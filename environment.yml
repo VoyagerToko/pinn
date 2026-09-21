@@ -1,0 +1,29 @@
+# Native Windows development environment (CPU JAX). For GPU training use scripts/setup_wsl_gpu.sh (WSL2).
+#   conda env create -f environment.yml && conda activate pinn && pip install -e .
+name: pinn
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - jax[cpu]
+      - flax
+      - optax
+      - ml_collections
+      - absl-py
+      - numpy
+      - scipy
+      - matplotlib
+      - h5py
+      - meshio
+      - pyvista
+      - vtk
+      - imageio
+      - imageio-ffmpeg
+      - tqdm
+      - pyyaml
+      - tabulate
+      - pytest
+      - wandb
+      - hydra-core

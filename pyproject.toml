@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pinnflow"
+version = "0.1.0"
+description = "Physics-informed neural networks for incompressible flow (JAX/Flax), built per the PINN Implementation Handbook"
+requires-python = ">=3.10"
+dependencies = [
+    "jax",
+    "flax",
+    "optax",
+    "numpy",
+    "scipy",
+    "ml_collections",
+    "matplotlib",
+    "h5py",
+    "tqdm",
+    "pyyaml",
+    "tabulate",
+]
+
+[project.optional-dependencies]
+viz = ["pyvista", "vtk", "meshio", "imageio", "imageio-ffmpeg"]
+dev = ["pytest"]
+tracking = ["wandb"]
+
+[tool.setuptools.packages.find]
+include = ["pinnflow*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

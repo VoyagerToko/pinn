@@ -1,0 +1,22 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+runs/
+wandb/
+.pytest_cache/
+external/
+data/**/*.zip
+data/**/*.pdf
+data/**/*.html
+data/cylinder_wake/*.mat
+*.msgpack
+*.vti
+*.vtp
+*.png
+*.mp4
+# downloaded reference data (recreate with scripts/download_data.sh)
+data/dfg_benchmark/*/
+data/dfg_benchmark/*.html
+data/tgv3d_re1600/*
+!data/README.md

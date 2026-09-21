@@ -1,0 +1,21 @@
+# pip mirror of environment.yml (CPU JAX). GPU: scripts/setup_wsl_gpu.sh installs jax[cuda12] inside WSL2.
+jax[cpu]
+flax
+optax
+ml_collections
+absl-py
+numpy
+scipy
+matplotlib
+h5py
+meshio
+pyvista
+vtk
+imageio
+imageio-ffmpeg
+tqdm
+pyyaml
+tabulate
+pytest
+wandb
+hydra-core
