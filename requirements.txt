@@ -1,11 +1,13 @@
-# pip mirror of environment.yml (CPU JAX). GPU: scripts/setup_wsl_gpu.sh installs jax[cuda12] inside WSL2.
-jax[cpu]
-flax
-optax
-ml_collections
+# Python dependencies (minimum versions pinned so pip cannot backtrack to pre-2025 releases).
+# GPU: install "jax[cuda12]" FIRST inside Linux/WSL2 (scripts/setup_linux_gpu.sh); this file leaves the
+# jax build unspecified so the CUDA wheel stays in place. On CPU-only machines it installs the CPU build.
+jax>=0.7
+flax>=0.10
+optax>=0.2.4
+ml_collections>=1.0
 absl-py
-numpy
-scipy
+numpy>=2.0
+scipy>=1.14
 matplotlib
 h5py
 meshio

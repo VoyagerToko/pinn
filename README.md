@@ -45,6 +45,10 @@ python scripts/check_env.py                    # must print devices: [CudaDevice
 
 Re-create the WSL environment any time with `wsl -d Ubuntu -- bash /mnt/c/Users/mehul/pinn/scripts/setup_wsl_gpu.sh`.
 
+**Any other Linux / WSL2 machine**: `bash scripts/setup_linux_gpu.sh` (installs Miniforge if needed, no hard-coded paths).
+Do **not** `pip install "jax[cuda12]"` in a native Windows Python: there are no CUDA wheels for Windows, so pip
+silently backtracks to a 2023 CPU-only JAX that this code cannot run on.
+
 Not installed (Linux-only or outside this project's scope, install on demand): PhysicsNeMo, OpenFOAM,
 FEniCSx/gmsh (ground-truth generation, STEP 3.1), DeepXDE, ParaView, Blender.
 The `pirate` branch of JAX-PI (PirateNet + SOAP) is cloned to `external/jaxpi-pirate`; it uses the same

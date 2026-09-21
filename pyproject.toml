@@ -8,12 +8,12 @@ version = "0.1.0"
 description = "Physics-informed neural networks for incompressible flow (JAX/Flax), built per the PINN Implementation Handbook"
 requires-python = ">=3.10"
 dependencies = [
-    "jax",
-    "flax",
-    "optax",
-    "numpy",
-    "scipy",
-    "ml_collections",
+    "jax>=0.7",
+    "flax>=0.10",
+    "optax>=0.2.4",
+    "numpy>=2.0",
+    "scipy>=1.14",
+    "ml_collections>=1.0",
     "matplotlib",
     "h5py",
     "tqdm",
