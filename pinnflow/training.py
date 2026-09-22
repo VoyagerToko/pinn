@@ -124,7 +124,8 @@ class Trainer:
                 w = L.ntk_weights(problem.ntk_diags(state.params, batch))
             else:
                 return state
-            w = {k: w.get(k, state.weights[k]) for k in state.weights}
+            fixed = tuple(config.weighting.get("fixed_terms", ("p_anchor", "gauge")))
+            w = {k: (state.weights[k] if k in fixed else w.get(k, state.weights[k])) for k in state.weights}
             return state.apply_weights(w)
 
         self._step = _step
@@ -212,7 +213,7 @@ class Trainer:
         return self.state
 
 
-def run_lbfgs(loss_fn: Callable, params, max_iters: int, memory_size: int = 20, log_every: int = 100, tol: float = 1e-12, logger: Optional[Callable] = None):
+def run_lbfgs(loss_fn: Callable, params, max_iters: int, memory_size: int = 20, log_every: int = 100, tol: float = 1e-12, logger: Optional[Callable] = None, patience: int = 50):
     """Optax L-BFGS loop (``optax.lbfgs`` uses the zoom line search satisfying the strong Wolfe conditions)."""
     opt = optax.lbfgs(memory_size=memory_size)
     value_and_grad = optax.value_and_grad_from_state(loss_fn)
@@ -225,13 +226,16 @@ def run_lbfgs(loss_fn: Callable, params, max_iters: int, memory_size: int = 20, 
         return params, state, value
 
     state = opt.init(params)
-    prev = np.inf
+    prev, stalls = np.inf, 0
     for i in range(max_iters):
         params, state, value = step(params, state)
         v = float(value)
         if logger is not None and (i % log_every == 0 or i == max_iters - 1):
             logger(i, v)
-        if not np.isfinite(v) or abs(prev - v) < tol * max(1.0, abs(v)):
+        if not np.isfinite(v):
+            break
+        stalls = stalls + 1 if abs(prev - v) < tol * max(1.0, abs(v)) else 0
+        if stalls >= patience:
             break
         prev = v
     return params
@@ -243,8 +247,10 @@ def run_lbfgs(loss_fn: Callable, params, max_iters: int, memory_size: int = 20, 
 def train_curriculum(trainer: Trainer, Re_list, steps_list, **train_kwargs):
     """for Re in [100, 200, 400, 1000]: warm-start from the previous Re, train, checkpoint."""
     assert len(Re_list) == len(steps_list)
-    for Re, steps in zip(Re_list, steps_list):
+    for i, (Re, steps) in enumerate(zip(Re_list, steps_list)):
         trainer.problem.set_Re(Re)
+        if i > 0:  # warm start the weights but restart Adam and its warm-up/decay schedule for the new Re
+            trainer.state = trainer.state.replace(opt_state=trainer.state.tx.init(trainer.state.params))
         trainer.train(int(steps), tag=f"Re={Re}", **train_kwargs)
         trainer.save(f"Re{int(Re)}.msgpack")
     return trainer.state

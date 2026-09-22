@@ -101,11 +101,16 @@ def cylinder_inflow_extension(u_in_fn: Callable, center=(0.2, 0.2), radius=0.05)
     return g
 
 
-def lid_extension(u_lid_fn: Callable) -> Callable:
-    """Smooth ``g(x, y) = (u_lid(x) * y, 0)`` for the regularised cavity lid (zero at the corners)."""
+def lid_extension(u_lid_fn: Callable, power: float = 8.0) -> Callable:
+    """Smooth ``g(x, y) = (u_lid(x) * y**power, 0)`` for the regularised cavity lid.
+
+    Equals the lid profile at y = 1 and vanishes on the other three walls (u_lid is zero at the
+    corners). A high ``power`` confines g to a thin layer under the lid so the network output
+    ``N = (u - g) / phi`` stays O(1) in the interior instead of cancelling a full-depth shear.
+    """
 
     def g(x, y):
-        return jnp.stack([u_lid_fn(x) * y, jnp.zeros_like(x)])
+        return jnp.stack([u_lid_fn(x) * y**power, jnp.zeros_like(x)])
 
     return g
 

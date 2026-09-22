@@ -2,7 +2,7 @@
 
 Formulations:
     vp                 (u, v, p); boundary either soft (u_bc, v_bc losses) or hard via
-                       u_hat = g + phi N with g = (u_lid(x) y, 0), phi = x(1-x)y(1-y)  [handbook 4.6b]
+                       u_hat = g + phi N with g = (u_lid(x) y^k, 0), phi = x(1-x)y(1-y)  [handbook 4.6b; k = problem.lid_power]
     streamfunction     (psi, p) exactly divergence-free; soft BCs on (psi_y, -psi_x)
 Pressure is anchored to zero mean (closed domain). ``set_Re`` switches the Reynolds number for the
 curriculum without re-initialising the network (warm start).
@@ -46,7 +46,7 @@ class CavityPINN(Problem):
     def net(self, params):
         raw = lambda z: self.arch.apply(params, z)
         if self.hard_bc:
-            g = lid_extension(self.bench.lid_profile)
+            g = lid_extension(self.bench.lid_profile, power=float(self.config.problem.get("lid_power", 8.0)))
             return hard_dirichlet(raw, lambda z: g(z[0], z[1]), lambda z: phi_unit_square(z[0], z[1]), constrained=(0, 1))
         return raw
 

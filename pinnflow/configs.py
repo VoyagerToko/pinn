@@ -79,6 +79,7 @@ def _base() -> ml_collections.ConfigDict:
     c.weighting = ml_collections.ConfigDict()
     c.weighting.scheme = "grad_norm"  # grad_norm | ntk | none
     c.weighting.grad_norm_reference = None  # None = JAX-PI mean-norm numerator; "r_u" = handbook 5.3(a) literal
+    c.weighting.fixed_terms = ("p_anchor", "gauge")  # terms that can reach exactly 0: never rebalanced adaptively
     c.weighting.init_weights = ml_collections.ConfigDict()
     c.weighting.momentum = 0.9
     c.weighting.update_every_steps = 1000
@@ -111,6 +112,7 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         p.Re = 100.0
         p.formulation = "vp"
         p.hard_bc = True
+        p.lid_power = 8.0  # exponent of the lid extension g = u_lid(x) y^k (hard BC)
         p.curriculum_Re = (100, 400, 1000)
         p.curriculum_steps = (20000, 40000, 140000)
         c.arch.out_dim = 3
