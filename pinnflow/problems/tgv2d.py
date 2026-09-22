@@ -117,10 +117,16 @@ class TaylorGreen2DPINN(Problem):
             div = chunked_vmap(lambda zz: self.residual_fn(params, self.bench.Re)(zz)[1], z)
         else:
             div = jnp.zeros(1)
+        # pressure is defined only up to an arbitrary function of time in unsteady incompressible flow:
+        # align the gauge per time slice of the (n_t, 64, 64) evaluation grid, not with one global constant
+        n_t = self.eval_pts.shape[0] // (64 * 64)
+        p_pred = pred[:, 2].reshape(n_t, -1)
+        p_ref = p.reshape(n_t, -1)
+        p_aligned = jax.vmap(align_pressure_gauge)(p_pred, p_ref).ravel()
         return {
             "rel_l2_u": float(relative_l2(pred[:, 0], u)),
             "rel_l2_v": float(relative_l2(pred[:, 1], v)),
-            "rel_l2_p": float(relative_l2(align_pressure_gauge(pred[:, 2], p), p)),
+            "rel_l2_p": float(relative_l2(p_aligned, p)),
             "rel_l2_vel": float(relative_l2(pred[:, :2], jnp.stack([u, v], -1))),
             "max_div": float(max_divergence(div)),
         }

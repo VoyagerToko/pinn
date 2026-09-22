@@ -178,6 +178,8 @@ Row A-C configs (VP formulation, second order) are about 3x cheaper per step tha
   available (`problem.phi="handbook"`), but it does not vanish at the inlet and grows to ~10^4 r^4 downstream;
   the default is a bounded variant with the same zero set plus a `tanh(x/0.1)` inlet factor so all Dirichlet
   boundaries are hard and only the outflow stays a soft (do-nothing) loss.
+* **Pressure gauge in unsteady runs**: p is unique only up to a function of time, so pressure errors are
+  computed after aligning the mean per time slice (handbook 5.6 says to align the gauge; this is the unsteady form).
 * **SOAP optimiser** is not in optax; it lives in `external/jaxpi-pirate`. Stage 2 here is optax L-BFGS.
 * **Grad-norm weighting** follows JAX-PI (mean gradient norm as numerator); set
   `weighting.grad_norm_reference="r_u"` for the handbook's literal `||grad L_res|| / ||grad L_i||`.

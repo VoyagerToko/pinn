@@ -97,7 +97,7 @@ def plot_tgv2d(cfg, workdir: Path, ckpt: str, n: int, times, animate: int, fps: 
         pts = jnp.stack([jnp.full(X.size, t), jnp.asarray(X.ravel()), jnp.asarray(Y.ravel())], -1)
         u, v, p, w = fields_2d(vel, pts)
         ue, ve, pe = (np.asarray(a) for a in b.exact(t, X.ravel(), Y.ravel()))
-        we = np.asarray(2 * np.sin(X.ravel()) * np.sin(Y.ravel()) * np.exp(-2 * t / b.Re))  # exact vorticity v_x - u_y
+        we = np.asarray(2 * np.cos(X.ravel()) * np.cos(Y.ravel()) * np.exp(-2 * t / b.Re))  # exact vorticity v_x - u_y = 2 cos x cos y e^{-2t/Re}
         p = np.asarray(align_pressure_gauge(jnp.asarray(p), jnp.asarray(pe)))
         rows = [("speed", np.hypot(u, v), np.hypot(ue, ve)), ("vorticity", w, we), ("pressure", p, pe)]
         fig, ax = plt.subplots(3, 3, figsize=(12, 11))
