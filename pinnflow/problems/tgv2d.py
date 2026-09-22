@@ -73,7 +73,7 @@ class TaylorGreen2DPINN(Problem):
         u0, v0, _ = self.bench.exact(z_ic[:, 0], z_ic[:, 1], z_ic[:, 2])
         out = {"u_ic": mse(pred_ic[:, 0], u0), "v_ic": mse(pred_ic[:, 1], v0)}
 
-        r_mom, r_c = jax.vmap(self.residual_fn(params, Re))(batch["res"])
+        r_mom, r_c = self.vmap_pointwise(self.residual_fn(params, Re))(batch["res"])
         terms = [r_mom[:, 0] ** 2, r_mom[:, 1] ** 2] + ([r_c**2] if self.formulation == "vp" else [])
         names = ["r_u", "r_v"] + (["r_c"] if self.formulation == "vp" else [])
         if self.use_causal:

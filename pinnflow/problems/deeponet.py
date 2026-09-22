@@ -60,7 +60,7 @@ class ParametricCavityDeepONet(Problem):
 
     def losses(self, params, batch) -> Dict[str, jnp.ndarray]:
         def per_Re(Re):
-            r_mom, r_c = jax.vmap(self.residual_fn(params, Re))(batch["res"])
+            r_mom, r_c = self.vmap_pointwise(self.residual_fn(params, Re))(batch["res"])
             p = jax.vmap(self.net(params, Re))(batch["res"])[:, 2]
             return mse(r_mom[:, 0]), mse(r_mom[:, 1]), mse(r_c), pressure_anchor_closed(p)
 

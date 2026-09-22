@@ -86,21 +86,33 @@ def grad_norm_weights(losses_fn: Callable, params, *args, reference: Optional[st
     ``reference=None`` uses the mean gradient norm over all terms as the numerator (JAX-PI);
     ``reference="r_u"`` reproduces the handbook formula literally with L_res as the reference.
     """
-    grads = jax.jacrev(losses_fn)(params, *args)
-    norms = {k: jnp.linalg.norm(ravel_pytree(g)[0]) for k, g in grads.items()}
+    # One backward pass per term (instead of jacrev over the dict, which batches all cotangents and
+    # multiplies the peak memory of the residual graph by the number of terms). Runs every ~1000 steps.
+    keys = list(jax.eval_shape(lambda p: losses_fn(p, *args), params).keys())
+    norms = {}
+    for k in keys:
+        g = jax.grad(lambda p, k=k: losses_fn(p, *args)[k])(params)
+        norms[k] = jnp.linalg.norm(ravel_pytree(g)[0])
     num = norms[reference] if reference is not None else jnp.mean(jnp.stack(list(norms.values())))
     return {k: num / (n + eps) for k, n in norms.items()}
 
 
-def ntk_diag(scalar_fn: Callable, params, *batched_args) -> Array:
-    """Diagonal of the NTK of a scalar-output function over a batch: K_ii = ||d f(x_i)/d theta||^2."""
+def ntk_diag(scalar_fn: Callable, params, *batched_args, chunk: int = 256) -> Array:
+    """Diagonal of the NTK of a scalar-output function over a batch: K_ii = ||d f(x_i)/d theta||^2.
+
+    Evaluated in chunks of ``chunk`` points (a full-batch ``vmap`` would hold batch x n_params floats).
+    """
 
     def one(*a):
         g = jax.grad(scalar_fn)(params, *a)
         g, _ = ravel_pytree(g)
         return jnp.dot(g, g)
 
-    return jax.vmap(one)(*batched_args)
+    n = batched_args[0].shape[0]
+    if n <= chunk or n % chunk != 0:
+        return jax.vmap(one)(*batched_args)
+    chunks = tuple(a.reshape(n // chunk, chunk, *a.shape[1:]) for a in batched_args)
+    return jax.lax.map(lambda c: jax.vmap(one)(*c), chunks).reshape(n)
 
 
 def ntk_weights(ntk_diags: Dict[str, Array], eps: float = 1e-12) -> Dict[str, Array]:

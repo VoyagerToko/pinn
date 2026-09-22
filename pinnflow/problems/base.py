@@ -70,6 +70,34 @@ class Problem:
         idx = jax.random.choice(key, self.rad_pool.shape[0], (n,), replace=False)
         return self.rad_pool[idx]
 
+    # --- memory --------------------------------------------------------------------------
+    def vmap_pointwise(self, fn):
+        """``jax.vmap`` of a per-point function, evaluated in rematerialised chunks.
+
+        Residuals with second/third-order derivatives create ~50 network-forward-equivalents of
+        intermediates per point (about 0.6 MB per point for a 6 x 256 network). Reverse mode needs
+        them all live at once, so a plain ``vmap`` over 8192 points allocates ~5 GB in a single
+        buffer. Here the batch is split into chunks of ``training.res_chunk`` points, each chunk is
+        ``jax.checkpoint``-ed and the chunks are processed by ``lax.map`` (a scan). The backward pass
+        then recomputes and differentiates one chunk at a time, so peak memory scales with the
+        chunk size instead of the batch size (about +30% compute).
+        Set ``training.remat=False`` for a plain ``vmap`` when memory is plentiful.
+        """
+        vf = jax.vmap(fn)
+        if not bool(self.config.training.get("remat", True)):
+            return vf
+        cf = jax.checkpoint(vf)
+        chunk = int(self.config.training.get("res_chunk", 2048))
+
+        def run(pts):
+            n = pts.shape[0]
+            if n <= chunk or n % chunk != 0:
+                return cf(pts)
+            out = jax.lax.map(cf, pts.reshape(n // chunk, chunk, *pts.shape[1:]))
+            return jax.tree_util.tree_map(lambda x: x.reshape(n, *x.shape[2:]), out)
+
+        return run
+
     # --- interface ---------------------------------------------------------------------
     def sample_batch(self, key):
         raise NotImplementedError

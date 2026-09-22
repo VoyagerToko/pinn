@@ -69,20 +69,8 @@ class CylinderWakeInversePINN(Problem):
     def residual_fn(self, params):
         vel = self.velocity_fn(params)
         lam1, lam2 = self.lambdas(params)
-
-        def r(z):
-            out, J, H = physics.derivatives(vel, z, 2)
-            u, v = out[0], out[1]
-            u_t, v_t = J[0, 0], J[1, 0]
-            u_x, u_y, v_x, v_y = J[0, 1], J[0, 2], J[1, 1], J[1, 2]
-            p_x, p_y = J[2, 1], J[2, 2]
-            lap_u = H[0, 1, 1] + H[0, 2, 2]
-            lap_v = H[1, 1, 1] + H[1, 2, 2]
-            r_u = u_t + lam1 * (u * u_x + v * u_y) + p_x - lam2 * lap_u
-            r_v = v_t + lam1 * (u * v_x + v * v_y) + p_y - lam2 * lap_v
-            return jnp.stack([r_u, r_v]), u_x + v_y
-
-        return r
+        # r = u_t + lambda_1 (u . grad) u + grad p - lambda_2 lap u  (Raissi et al. 2019)
+        return physics.ns_vp_residual(vel, Re=None, dim=2, unsteady=True, conv_coeff=lam1, visc=lam2)
 
     # ------------------------------------------------------------------
     def uniform_collocation(self, key, n):
@@ -99,7 +87,7 @@ class CylinderWakeInversePINN(Problem):
         pred = vel(batch["data"])
         out = {"u_data": mse(pred[:, 0], batch["data_uv"][:, 0]), "v_data": mse(pred[:, 1], batch["data_uv"][:, 1])}
         pts = jnp.concatenate([batch["data"], batch["res"]], axis=0)
-        r_mom, r_c = jax.vmap(self.residual_fn(params))(pts)
+        r_mom, r_c = self.vmap_pointwise(self.residual_fn(params))(pts)
         out["r_u"] = mse(r_mom[:, 0])
         out["r_v"] = mse(r_mom[:, 1])
         if self.formulation == "vp":

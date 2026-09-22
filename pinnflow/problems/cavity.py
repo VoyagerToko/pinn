@@ -87,7 +87,7 @@ class CavityPINN(Problem):
             u_bc, v_bc = self.bench.boundary_velocity(batch["bc"][:, 0], batch["bc"][:, 1])
             out["u_bc"] = mse(pred[:, 0], u_bc)
             out["v_bc"] = mse(pred[:, 1], v_bc)
-        r_mom, r_c = jax.vmap(self.residual_fn(params, Re))(batch["res"])
+        r_mom, r_c = self.vmap_pointwise(self.residual_fn(params, Re))(batch["res"])
         out["r_u"] = mse(r_mom[:, 0])
         out["r_v"] = mse(r_mom[:, 1])
         if self.formulation == "vp":

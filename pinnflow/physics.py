@@ -11,8 +11,9 @@ discretised.
 Two families of helpers:
 
 1. **Point-wise** residuals for networks ``fn(z) -> outputs`` with ``z`` a single point
-   ``(t, x, y[, z])`` (or ``(x, y[, z])`` for steady problems). Derivatives use nested
-   forward-mode ``jax.jacfwd`` (cheap for a handful of inputs) and are meant to be ``vmap``-ed.
+   ``(t, x, y[, z])`` (or ``(x, y[, z])`` for steady problems). Derivatives are *directional*
+   forward-mode ``jvp`` calls along unit coordinate vectors (forward-over-forward for second
+   order), so only the derivatives the residual needs are ever formed; meant to be ``vmap``-ed.
    Formulations (handbook 1.2): VP (velocity-pressure), stream function (2D, exactly
    divergence-free), vector potential (3D, exactly divergence-free).
 
@@ -59,28 +60,56 @@ def derivatives(fn: Callable, z: Array, order: int):
     return tuple(outs)
 
 
+def _unit(d: int, i: int) -> Array:
+    return jnp.zeros(d).at[i].set(1.0)
+
+
+def directional(fn: Callable, z: Array, i: int, second: bool = False):
+    """Directional derivative(s) of ``fn`` along coordinate ``i`` by forward mode.
+
+    ``second=False`` -> ``d fn / d z_i``;  ``second=True`` -> ``(d fn / d z_i, d^2 fn / d z_i^2)``.
+    Forward-over-forward with a unit tangent: two nested ``jvp`` calls, no Jacobian tensors. This
+    is what keeps the memory of a 6 x 256 network with third-order derivatives in the low GB range
+    (the full ``jacfwd`` tensors need > 60 GB for the same batch).
+    """
+    e = _unit(z.shape[0], i)
+    if second:
+        return hvp_fwdfwd(fn, (z,), (e,), return_primals=True)
+    return jvp(fn, (z,), (e,))[1]
+
+
 # --------------------------------------------------------------------------------------
 # 1.2 VP formulation
 # --------------------------------------------------------------------------------------
-def ns_vp_residual(fn: Callable, Re: float, dim: int = 2, unsteady: bool = True) -> Callable:
+def ns_vp_residual(fn: Callable, Re, dim: int = 2, unsteady: bool = True, conv_coeff=1.0, visc=None) -> Callable:
     """Velocity-pressure residual for ``fn(z) -> (u_1..u_dim, p)``.
 
-    Returns ``r(z) -> (r_mom (dim,), r_c ())``. With ``dim=2``: r_u, r_v, r_c (handbook 1.1).
+        r_mom = u_t + conv_coeff (u . grad) u + grad p - visc lap u,      visc = 1/Re by default
+        r_c   = div u
+
+    Returns ``r(z) -> (r_mom (dim,), r_c ())``. ``conv_coeff``/``visc`` may be traced scalars
+    (trainable lambda_1, lambda_2 in the inverse problem). Cost: one first-order and ``dim``
+    second-order directional derivatives, all forward mode.
     """
     it, sp = _indices(unsteady, dim)
-    spi = jnp.array(sp)
+    nu = (1.0 / Re) if visc is None else visc
 
     def r(z):
-        out, J, H = derivatives(fn, z, 2)
+        out = fn(z)
         u = out[:dim]
-        grad_u = J[:dim][:, spi]  # (dim, dim)   grad_u[i, j] = d u_i / d x_j
-        grad_p = J[dim][spi]  # (dim,)
-        lap_u = jnp.stack([sum(H[i, s, s] for s in sp) for i in range(dim)])
-        u_t = J[:dim, it] if unsteady else jnp.zeros(dim)
-        conv = grad_u @ u  # (u . grad) u_i = sum_j u_j d u_i / d x_j
-        r_mom = u_t + conv + grad_p - lap_u / Re
-        r_c = jnp.trace(grad_u)
-        return r_mom, r_c
+        u_t = directional(fn, z, it)[:dim] if unsteady else jnp.zeros(dim)
+        conv = jnp.zeros(dim)
+        lap = jnp.zeros(dim)
+        grad_p = []
+        div = 0.0
+        for j, s in enumerate(sp):
+            f_s, f_ss = directional(fn, z, s, second=True)
+            conv = conv + u[j] * f_s[:dim]
+            lap = lap + f_ss[:dim]
+            grad_p.append(f_s[dim])
+            div = div + f_s[j]
+        r_mom = u_t + conv_coeff * conv + jnp.stack(grad_p) - nu * lap
+        return r_mom, div
 
     return r
 
@@ -88,42 +117,26 @@ def ns_vp_residual(fn: Callable, Re: float, dim: int = 2, unsteady: bool = True)
 # --------------------------------------------------------------------------------------
 # 1.2 stream function formulation (2D): psi, p with u = psi_y, v = -psi_x
 # --------------------------------------------------------------------------------------
-def ns_streamfunction_residual(fn: Callable, Re: float, unsteady: bool = True) -> Callable:
-    """Residual for ``fn(z) -> (psi, p)``; divergence is identically zero (returned as a check).
-
-    Third-order derivatives of psi are needed (handbook 1.2, 4.6a).
-    Returns ``r(z) -> (r_mom (2,), r_c ())`` where ``r_c`` is the (machine-zero) divergence.
-    """
-    it, (ix, iy) = _indices(unsteady, 2)
-
-    def r(z):
-        out, J, H, T = derivatives(fn, z, 3)
-        psi_J, psi_H, psi_T = J[0], H[0], T[0]
-        u, v = psi_J[iy], -psi_J[ix]
-        u_x, u_y = psi_H[iy, ix], psi_H[iy, iy]
-        v_x, v_y = -psi_H[ix, ix], -psi_H[ix, iy]
-        u_xx, u_yy = psi_T[iy, ix, ix], psi_T[iy, iy, iy]
-        v_xx, v_yy = -psi_T[ix, ix, ix], -psi_T[ix, iy, iy]
-        u_t = psi_H[iy, it] if unsteady else 0.0
-        v_t = -psi_H[ix, it] if unsteady else 0.0
-        p_x, p_y = J[1, ix], J[1, iy]
-        r_u = u_t + u * u_x + v * u_y + p_x - (u_xx + u_yy) / Re
-        r_v = v_t + u * v_x + v * v_y + p_y - (v_xx + v_yy) / Re
-        r_c = u_x + v_y
-        return jnp.stack([r_u, r_v]), r_c
-
-    return r
-
-
 def streamfunction_velocity(fn: Callable, unsteady: bool = True) -> Callable:
-    """``fn(z) -> (psi, p)``  =>  ``vel(z) -> (u, v, p)``."""
+    """``fn(z) -> (psi, p)``  =>  ``vel(z) -> (u, v, p)`` with ``u = psi_y, v = -psi_x``."""
     it, (ix, iy) = _indices(unsteady, 2)
 
     def vel(z):
-        out, J = derivatives(fn, z, 1)
-        return jnp.stack([J[0, iy], -J[0, ix], out[1]])
+        out = fn(z)
+        psi_x = directional(fn, z, ix)[0]
+        psi_y = directional(fn, z, iy)[0]
+        return jnp.stack([psi_y, -psi_x, out[1]])
 
     return vel
+
+
+def ns_streamfunction_residual(fn: Callable, Re: float, unsteady: bool = True) -> Callable:
+    """Residual for ``fn(z) -> (psi, p)``; the divergence is identically zero (returned as a check).
+
+    Third-order derivatives of psi enter through second derivatives of the derived velocity
+    (handbook 1.2, 4.6a). Returns ``r(z) -> (r_mom (2,), r_c ())``.
+    """
+    return ns_vp_residual(streamfunction_velocity(fn, unsteady), Re, dim=2, unsteady=unsteady)
 
 
 # --------------------------------------------------------------------------------------
@@ -132,12 +145,11 @@ def streamfunction_velocity(fn: Callable, unsteady: bool = True) -> Callable:
 def vector_potential_velocity(fn: Callable, unsteady: bool = True) -> Callable:
     """``fn(z) -> (A1, A2, A3, p)``  =>  ``vel(z) -> (u, v, w, p)`` with ``u = curl A``."""
     it, sp = _indices(unsteady, 3)
-    sp = jnp.array(sp)
 
     def vel(z):
-        out, J = derivatives(fn, z, 1)
-        JA = J[:3][:, sp]  # JA[k, j] = d A_k / d x_j
-        u = jnp.einsum("ijk,kj->i", _EPS, JA)
+        out = fn(z)
+        dA = jnp.stack([directional(fn, z, s)[:3] for s in sp], axis=1)  # dA[k, j] = d A_k / d x_j
+        u = jnp.einsum("ijk,kj->i", _EPS, dA)
         return jnp.concatenate([u, out[3:4]])
 
     return vel
@@ -150,25 +162,11 @@ def ns_vector_potential_residual(fn: Callable, Re: float, unsteady: bool = True)
     and ``gauge = div A`` for the weak gauge penalty ``lambda_g ||div A||^2``.
     """
     it, sp = _indices(unsteady, 3)
-    spi = jnp.array(sp)
+    r_vp = ns_vp_residual(vector_potential_velocity(fn, unsteady), Re, dim=3, unsteady=unsteady)
 
     def r(z):
-        out, J, H, T = derivatives(fn, z, 3)
-        JA = J[:3][:, spi]  # (3, 3)      d A_k / d x_j
-        HA = H[:3][:, spi][:, :, spi]  # (3, 3, 3)   d^2 A_k / d x_j d x_l
-        TA = T[:3][:, spi][:, :, spi][:, :, :, spi]  # (3,3,3,3) d^3 A_k / dx_j dx_l dx_m
-        u = jnp.einsum("ijk,kj->i", _EPS, JA)
-        grad_u = jnp.einsum("ijk,kjl->il", _EPS, HA)  # d u_i / d x_l
-        lap_u = jnp.einsum("ijk,kjll->i", _EPS, TA)
-        if unsteady:
-            HA_t = H[:3][:, spi, it]  # d^2 A_k / d x_j d t
-            u_t = jnp.einsum("ijk,kj->i", _EPS, HA_t)
-        else:
-            u_t = jnp.zeros(3)
-        grad_p = J[3][spi]
-        r_mom = u_t + grad_u @ u + grad_p - lap_u / Re
-        r_c = jnp.trace(grad_u)
-        gauge = jnp.trace(JA)
+        r_mom, r_c = r_vp(z)
+        gauge = sum(directional(fn, z, s)[k] for k, s in enumerate(sp))
         return r_mom, r_c, gauge
 
     return r

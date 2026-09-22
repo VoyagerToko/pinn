@@ -168,13 +168,13 @@ class DFGCylinderPINN(Problem):
                 out[f"u_{name}"] = mse(p[:, 0])
                 out[f"v_{name}"] = mse(p[:, 1])
         # outflow (soft)
-        r_out = jax.vmap(self.outflow_residual_fn(params))(batch["bc_outlet"])
+        r_out = self.vmap_pointwise(self.outflow_residual_fn(params))(batch["bc_outlet"])
         out["u_out"] = mse(r_out[:, 0])
         out["v_out"] = mse(r_out[:, 1])
         if self.outflow == "neumann_p0":
             out["p_out"] = mse(r_out[:, 2])
         # residuals
-        r_mom, r_c = jax.vmap(self.residual_fn(params))(batch["res"])
+        r_mom, r_c = self.vmap_pointwise(self.residual_fn(params))(batch["res"])
         terms = [r_mom[:, 0] ** 2, r_mom[:, 1] ** 2, r_c**2]
         if self.use_causal:
             vals, _ = causal_residual_losses(batch["res"][:, 0], terms, self.num_chunks, batch["causal_eps"])

@@ -66,6 +66,8 @@ def _base() -> ml_collections.ConfigDict:
     c.training.res_batch_size = 8192
     c.training.bc_batch_size = 2048
     c.training.ic_batch_size = 2048
+    c.training.remat = True  # chunked + rematerialised residual evaluation (memory ~ res_chunk, ~30% slower)
+    c.training.res_chunk = 2048  # points per rematerialised chunk; lower it on small GPUs
     c.training.rad_every = None
     c.training.rad_candidates = 100000
     c.training.rad_pool_size = 65536

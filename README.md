@@ -135,11 +135,30 @@ Then: `python scripts/evaluate.py --benchmark cylinder --workdir runs/cylinder_G
 cycle statistics, overlay against FEATFLOW), `--benchmark tgv3d` (E_k, dissipation peak, enstrophy identity,
 spectrum slope), and `python scripts/visualize.py --workdir runs/tgv3d_H` for the animation.
 
-### GPU memory notes (6 GB)
-* defaults: `res_batch_size` 8192 (2D), 16384 (cylinder), SPINN grid 32^4 (~1M effective points); the
-  handbook's 64^4 needs `--set training.n_per_axis="(64,64,64,64)"` and will need gradient accumulation
-  (`optim.grad_accum_steps`) or a smaller rank on this card
-* set `XLA_PYTHON_CLIENT_PREALLOCATE=false` in WSL
+### Memory and speed notes
+
+Point-wise residuals are evaluated in rematerialised chunks (`training.remat=True`, `training.res_chunk=2048`),
+so peak memory scales with the chunk size, not the batch size. Measured on an RTX 3060 Laptop (6 GB, WSL2),
+Benchmark A row G with the default config (stream function = third-order derivatives, 6 x 256, batch 8192):
+
+| | value |
+|---|---|
+| peak GPU memory (incl. XLA autotuning) | 5.9 GB |
+| step time | ~1.0 s |
+| first-step compile + autotune | ~15 min |
+| rel. L2 after 400 steps | 6e-2 |
+
+Expect roughly 4x faster steps on a 16 GB desktop card (about 0.25 s/step, 3-4 h for the 50k-step run).
+Row A-C configs (VP formulation, second order) are about 3x cheaper per step than rows D-G.
+
+* On 16 GB cards `--set training.remat=False` removes the ~30% recomputation overhead for 2D runs.
+* Lower `training.res_chunk` (e.g. 1024) if a 6 GB card still runs out of memory; raise it on big cards.
+* The grad-norm / NTK weight updates run one backward pass per loss term every `update_every_steps`; NTK
+  diagonals are chunked in blocks of 256 points.
+* Slow first compile: `export XLA_FLAGS=--xla_gpu_autotune_level=2` cuts autotuning time at a small runtime cost.
+* SPINN grid: 32^4 (~1M effective points) is the default; the handbook's 64^4 needs
+  `--set training.n_per_axis="(64,64,64,64)"` and a 16 GB card.
+* Always `export XLA_PYTHON_CLIENT_PREALLOCATE=false` in WSL so the display driver keeps its share.
 
 ## 7. Deviations from the handbook and things to know
 
