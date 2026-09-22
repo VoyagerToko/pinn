@@ -10,7 +10,7 @@ residuals against analytic solutions before a single network is trained.
 pinn/
 ├── pinnflow/                 the package (one module per handbook step, see below)
 │   └── problems/             one PINN problem class per benchmark (A-D, inverse, PI-DeepONet)
-├── scripts/                  train.py · evaluate.py · visualize.py · check_env.py · setup_wsl_gpu.sh
+├── scripts/                  train.py · evaluate.py · plot2d.py · visualize.py · check_env.py · setup_*_gpu.sh
 ├── tests/                    pytest suite (physics gates, archs, losses, metrics, data, smoke training)
 ├── data/                     downloaded reference data (see "Data inventory")
 ├── external/                 JAX-PI (main + pirate), SPINN, CausalPINNs  (git clones, --depth 1)
@@ -130,6 +130,14 @@ for r in A B C D E F G; do python scripts/train.py --benchmark tgv2d --ablation 
 
 Every run writes `runs/<benchmark>_<row>/{config.json, metrics.csv, latest.msgpack, final_eval.json}`.
 `--steps`, `--lbfgs`, `--windows`, `--seed`, `--wandb` and `--set key=value` override the config.
+
+Figures and movies for the 2D cases (fields vs exact, error maps, streamlines, Ghia profiles, vortex street):
+
+```bash
+python scripts/plot2d.py --benchmark tgv2d    --workdir runs/tgv2d_G --animate 120
+python scripts/plot2d.py --benchmark cavity   --workdir runs/cavity_F
+python scripts/plot2d.py --benchmark cylinder --workdir runs/cylinder_G --animate 200
+```
 
 Then: `python scripts/evaluate.py --benchmark cylinder --workdir runs/cylinder_G` (Cd/Cl series, St,
 cycle statistics, overlay against FEATFLOW), `--benchmark tgv3d` (E_k, dissipation peak, enstrophy identity,
