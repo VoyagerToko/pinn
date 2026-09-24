@@ -40,6 +40,7 @@ def main():
     ap.add_argument("--fps", type=int, default=60)
     ap.add_argument("--no-render", action="store_true")
     ap.add_argument("--particles", type=int, default=0)
+    ap.add_argument("--speed-max", type=float, default=1.0, help="upper end of the fixed colour range (|u| <= 1 for the TGV initial condition)")
     args = ap.parse_args()
     workdir = Path(args.workdir)
     cfg = ml_collections.ConfigDict(json.loads((workdir / "config.json").read_text()))
@@ -66,7 +67,8 @@ def main():
         for frame in range(args.frames):
             grid = pv.read(str(out / f"frame_{frame:04d}.vti"))
             tubes = pv.read(str(out / f"q_{frame:04d}.vtp"))
-            viz.render_frame(grid, tubes, render_dir / f"{frame:04d}.png", frame=frame)
+            label = f"3D Taylor-Green, Re = {problem.bench.Re:g}, PINN (SPINN)   t = {times[frame]:.2f}   vortex tubes: Q = 0.1 Q_max"
+            viz.render_frame(grid, tubes, render_dir / f"{frame:04d}.png", frame=frame, clim=(0.0, args.speed_max), text=label)
         viz.encode_video(render_dir, workdir / "tgv3d.mp4", fps=args.fps)
         print("video ->", workdir / "tgv3d.mp4")
 

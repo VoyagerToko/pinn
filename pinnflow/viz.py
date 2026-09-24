@@ -96,14 +96,22 @@ def advect_particles(vel_fn_batched: Callable, seeds: np.ndarray, t_span=(0.0, 2
     return sol.y.T.reshape(n_frames, -1, 3)
 
 
-def render_frame(grid, tubes, path: os.PathLike, frame: int = 0, window_size=(1920, 1080), cmap: str = "plasma"):
-    """9.4 PyVista off-screen volume render with vortex tubes and a slow orbit."""
+def render_frame(grid, tubes, path: os.PathLike, frame: int = 0, window_size=(1920, 1080), cmap: str = "plasma", clim=None, text: Optional[str] = None):
+    """9.4 PyVista off-screen volume render with vortex tubes and a slow orbit.
+
+    ``clim`` fixes the colour range across frames (otherwise every frame rescales and the movie flickers).
+    """
     import pyvista as pv
 
     pl = pv.Plotter(off_screen=True, window_size=window_size)
-    pl.add_volume(grid, scalars="speed", cmap=cmap, opacity="sigmoid")
+    pl.set_background("black")
+    pl.add_volume(grid, scalars="speed", cmap=cmap, opacity="sigmoid", clim=clim, scalar_bar_args={"color": "white", "title": "|u|"})
     if tubes is not None and tubes.n_points > 0:
         pl.add_mesh(tubes, color="cyan", opacity=0.6)
+    pl.add_mesh(grid.outline(), color="white", line_width=1)
+    if text:
+        pl.add_text(text, position="upper_left", font_size=14, color="white")
+    pl.camera_position = "iso"
     pl.camera.azimuth = frame * 0.5
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     pl.screenshot(str(path))
