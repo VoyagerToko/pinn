@@ -134,10 +134,30 @@ class CavityPINN(Problem):
                 self._ref_cache[Re] = None
         return self._ref_cache[Re]
 
+    def _fd_reference(self, Re: int):
+        """Finite-difference solution of the *regularised*-lid cavity (scripts/cavity_fd_reference.py), finest grid available."""
+        key = ("fd", Re)
+        if key not in self._ref_cache:
+            from ..data import DATA_DIR
+
+            files = sorted((DATA_DIR / "cavity_fd").glob(f"cavity_fd_Re{Re}_regularised_N*.npz"), key=lambda p: int(p.stem.split("_N")[-1]))
+            if files:
+                d = np.load(files[-1])
+                X, Y = np.meshgrid(d["x"], d["y"], indexing="ij")
+                self._ref_cache[key] = {"pts": jnp.asarray(np.stack([X.ravel(), Y.ravel()], -1), jnp.float32), "uv": jnp.asarray(np.stack([d["u"].ravel(), d["v"].ravel()], -1), jnp.float32), "N": int(d["N"])}
+            else:
+                self._ref_cache[key] = None
+        return self._ref_cache[key]
+
     def evaluate(self, params) -> Dict[str, float]:
         Re = int(round(self.Re))
         vel = self.velocity_fn(params)
         out = {}
+        fd = self._fd_reference(Re)
+        if fd is not None:  # field error against a converged solution of the same (regularised-lid) problem
+            pred = chunked_vmap(vel, fd["pts"])[:, :2]
+            out["rel_l2_vel_vs_fd"] = float(relative_l2(pred, fd["uv"]))
+            out["fd_grid_N"] = fd["N"]
         ref = self._reference(Re)
         if ref is not None:
             pts = meshgrid_points(jnp.asarray(ref["x"]), jnp.asarray(ref["y"]))
