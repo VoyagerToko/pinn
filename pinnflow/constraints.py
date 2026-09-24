@@ -47,6 +47,11 @@ def phi_unit_square(x: Array, y: Array) -> Array:
     return x * (1 - x) * y * (1 - y)
 
 
+def phi_unit_square_open_top(x: Array, y: Array) -> Array:
+    """Zero on the left, right and bottom walls of [0,1]^2 but not on the lid y = 1."""
+    return x * (1 - x) * y
+
+
 def cylinder_signed_distance_sq(x: Array, y: Array, center=(0.2, 0.2), radius=0.05) -> Array:
     """(x-cx)^2 + (y-cy)^2 - r^2 : zero on the cylinder, positive outside."""
     return (x - center[0]) ** 2 + (y - center[1]) ** 2 - radius**2
@@ -122,18 +127,20 @@ def hard_dirichlet(net_fn: Callable, g_fn: Callable, phi_fn: Callable, constrain
     """Return ``u_hat(z) = g(z) + phi(z) * N(z)`` on the ``constrained`` output components.
 
     All callables take the same point vector ``z``. ``g_fn`` returns a vector with one entry per
-    constrained component; other outputs (e.g. pressure) pass through unchanged so the
+    constrained component; ``phi_fn`` returns either one distance shared by all of them or a
+    vector with one distance per component (different components may vanish on different
+    boundary pieces). Other outputs (e.g. pressure) pass through unchanged so the
     boundary loss for velocity disappears from the objective entirely.
     """
     constrained = tuple(constrained)
 
     def u_hat(z):
         n = net_fn(z)
-        phi = phi_fn(z)
+        phi = jnp.broadcast_to(phi_fn(z), (len(constrained),))
         g = g_fn(z)
         out = n
         for k, c in enumerate(constrained):
-            out = out.at[c].set(g[k] + phi * n[c])
+            out = out.at[c].set(g[k] + phi[k] * n[c])
         return out
 
     return u_hat

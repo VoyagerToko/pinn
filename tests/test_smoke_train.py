@@ -67,6 +67,22 @@ def test_cavity_rows_and_curriculum(ablation, tmp_path):
     assert "ghia_u_rel_err" in ev
 
 
+def test_cavity_soft_lid_constraint(tmp_path):
+    """lid_bc="soft": no-slip exact on the fixed walls, v = 0 exact on the lid, u on the lid is a loss term."""
+    tr, problem = _run("cavity", "F", tmp_path, extra={"problem.lid_bc": "soft"})
+    assert "u_lid" in tr.state.weights
+    vel = jax.vmap(problem.velocity_fn(tr.state.params))
+    s = np.linspace(0.05, 0.95, 7)
+    walls = np.concatenate([np.stack([s, 0 * s], 1), np.stack([0 * s, s], 1), np.stack([0 * s + 1, s], 1)])
+    assert np.abs(np.asarray(vel(walls))[:, :2]).max() < 1e-6
+    top = np.asarray(vel(np.stack([s, 0 * s + 1], 1)))
+    assert np.abs(top[:, 1]).max() < 1e-6
+    # default (lid_bc="hard") keeps the exact lid profile
+    _, hard = _run("cavity", "F", tmp_path / "hard")
+    top_h = np.asarray(jax.vmap(hard.velocity_fn(hard.init_params(jax.random.PRNGKey(1))))(np.stack([s, 0 * s + 1], 1)))
+    np.testing.assert_allclose(top_h[:, 0], np.asarray(hard.bench.lid_profile(s)), atol=1e-6)
+
+
 @pytest.mark.parametrize("ablation", ["C", "E"])
 def test_cylinder_rows(ablation, tmp_path):
     tr, problem = _run("cylinder", ablation, tmp_path, t1=0.1)

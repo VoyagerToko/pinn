@@ -113,6 +113,7 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         p.formulation = "vp"
         p.hard_bc = True
         p.lid_power = 8.0  # exponent of the lid extension g = u_lid(x) y^k (hard BC)
+        p.lid_bc = "hard"  # with hard_bc: "hard" imposes u = u_lid exactly, "soft" leaves only u on the lid as a loss
         p.curriculum_Re = (100, 400, 1000)
         p.curriculum_steps = (20000, 40000, 140000)
         c.arch.out_dim = 3

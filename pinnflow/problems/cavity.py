@@ -17,7 +17,7 @@ import numpy as np
 
 from .. import physics
 from ..benchmarks import LidDrivenCavity, ghia_tables
-from ..constraints import hard_dirichlet, lid_extension, phi_unit_square
+from ..constraints import hard_dirichlet, lid_extension, phi_unit_square, phi_unit_square_open_top
 from ..data import cavity_centerlines, load_jaxpi_cavity
 from ..losses import mse, pressure_anchor_closed
 from ..metrics import relative_l2
@@ -35,6 +35,12 @@ class CavityPINN(Problem):
         self.Re = float(config.problem.Re)
         self.formulation = config.problem.get("formulation", "vp")
         self.hard_bc = bool(config.problem.get("hard_bc", False)) and self.formulation == "vp"
+        # "hard": u = u_lid imposed exactly on the lid; "soft": only the lid's tangential velocity is a loss term
+        # (the exact lid profile has u_x = -+50 at the top corners, where no-slip on the side walls and
+        # continuity require u_x = 0, so no smooth field satisfies all Dirichlet data and div u = 0 there)
+        self.soft_lid = self.hard_bc and config.problem.get("lid_bc", "hard") == "soft"
+        if self.soft_lid:
+            self.init_weights.setdefault("u_lid", 1.0)
         self.dom = jnp.asarray(self.bench.domain)
         self._ref_cache: Dict[int, Dict] = {}
 
@@ -47,7 +53,12 @@ class CavityPINN(Problem):
         raw = lambda z: self.arch.apply(params, z)
         if self.hard_bc:
             g = lid_extension(self.bench.lid_profile, power=float(self.config.problem.get("lid_power", 8.0)))
-            return hard_dirichlet(raw, lambda z: g(z[0], z[1]), lambda z: phi_unit_square(z[0], z[1]), constrained=(0, 1))
+            if self.soft_lid:
+                # exact no-slip on the three fixed walls and exact v = 0 on the lid; u on the lid is a soft loss
+                phi = lambda z: jnp.stack([phi_unit_square_open_top(z[0], z[1]), phi_unit_square(z[0], z[1])])
+            else:
+                phi = lambda z: phi_unit_square(z[0], z[1])
+            return hard_dirichlet(raw, lambda z: g(z[0], z[1]), phi, constrained=(0, 1))
         return raw
 
     def velocity_fn(self, params):
@@ -87,6 +98,9 @@ class CavityPINN(Problem):
             u_bc, v_bc = self.bench.boundary_velocity(batch["bc"][:, 0], batch["bc"][:, 1])
             out["u_bc"] = mse(pred[:, 0], u_bc)
             out["v_bc"] = mse(pred[:, 1], v_bc)
+        elif self.soft_lid:
+            top = batch["bc"][batch["bc"].shape[0] // 4 : batch["bc"].shape[0] // 2]  # sample_batch order: bottom, top, left, right
+            out["u_lid"] = mse(vel(top)[:, 0], self.bench.lid_profile(top[:, 0]))
         r_mom, r_c = self.vmap_pointwise(self.residual_fn(params, Re))(batch["res"])
         out["r_u"] = mse(r_mom[:, 0])
         out["r_v"] = mse(r_mom[:, 1])
@@ -104,6 +118,9 @@ class CavityPINN(Problem):
         if not self.hard_bc:
             d["u_bc"] = ntk_diag(vel_i(0), params, batch["bc"])
             d["v_bc"] = ntk_diag(vel_i(1), params, batch["bc"])
+        elif self.soft_lid:
+            n = batch["bc"].shape[0]
+            d["u_lid"] = ntk_diag(vel_i(0), params, batch["bc"][n // 4 : n // 2])
         if self.formulation == "vp":
             d["r_c"] = ntk_diag(lambda p, z: self.residual_fn(p, batch["Re"])(z)[1], params, batch["res"])
         return d
