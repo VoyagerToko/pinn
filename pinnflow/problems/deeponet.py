@@ -15,7 +15,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from .. import physics
-from ..benchmarks import LidDrivenCavity
+from ..benchmarks import LidDrivenCavity, ghia_tables
 from ..constraints import hard_dirichlet, lid_extension, phi_unit_square
 from ..data import load_jaxpi_cavity
 from ..losses import mse, pressure_anchor_closed
@@ -35,6 +35,10 @@ class ParametricCavityDeepONet(Problem):
         self.n_Re = int(config.training.n_Re_per_batch)
         self.dom = jnp.asarray(self.bench.domain)
         self.eval_Re = tuple(int(r) for r in config.problem.get("eval_Re", (100, 400, 1000)))
+        # zero-shot test: Re values inside ``holdout_Re_band`` are never sampled during training
+        band = config.problem.get("holdout_Re_band", None)
+        self.holdout = None if band is None else (float(band[0]), float(band[1]))
+        self.zero_shot_Re = config.problem.get("zero_shot_Re", None)
 
     def init_params(self, key):
         return self.arch.init(key, jnp.zeros(1), jnp.zeros(self.input_dim))
@@ -54,7 +58,14 @@ class ParametricCavityDeepONet(Problem):
         cfg = self.config.training
         k1, k2 = jax.random.split(key)
         lo, hi = np.log10(self.Re_range[0]), np.log10(self.Re_range[1])
-        Re = 10 ** jax.random.uniform(k1, (self.n_Re,), minval=lo, maxval=hi)
+        if self.holdout is None:
+            Re = 10 ** jax.random.uniform(k1, (self.n_Re,), minval=lo, maxval=hi)
+        else:
+            # log-uniform on [lo, hi] minus the held-out band: draw on the shortened interval, then
+            # shift the part above the band's lower edge past the band
+            b0, b1 = np.log10(self.holdout[0]), np.log10(self.holdout[1])
+            s = jax.random.uniform(k1, (self.n_Re,), minval=lo, maxval=hi - (b1 - b0))
+            Re = 10 ** jnp.where(s < b0, s, s + (b1 - b0))
         res = uniform_box(k2, self.dom, int(cfg.res_batch_size))
         return {"Re": Re, "res": res}
 
@@ -79,4 +90,15 @@ class ParametricCavityDeepONet(Problem):
             U_pred = jnp.sqrt(pred[:, 0] ** 2 + pred[:, 1] ** 2).reshape(ref["u"].shape)
             U_ref = np.sqrt(ref["u"] ** 2 + ref["v"] ** 2)
             out[f"rel_l2_speed_Re{Re}"] = float(relative_l2(U_pred, jnp.asarray(U_ref)))
+            out[f"rel_l2_uv_Re{Re}"] = float(relative_l2(pred[:, :2], jnp.stack([jnp.asarray(ref["u"]).ravel(), jnp.asarray(ref["v"]).ravel()], -1)))
+            try:
+                tab = ghia_tables(Re)
+                yq, xq = jnp.asarray(tab["y"][1:-1]), jnp.asarray(tab["x"][1:-1])
+                f = self.net(params, float(Re))
+                u_c = chunked_vmap(f, jnp.stack([jnp.full_like(yq, 0.5), yq], -1))[:, 0]
+                v_c = chunked_vmap(f, jnp.stack([xq, jnp.full_like(xq, 0.5)], -1))[:, 1]
+                out[f"ghia_u_rel_err_Re{Re}"] = float(relative_l2(u_c, jnp.asarray(tab["u"][1:-1])))
+                out[f"ghia_v_rel_err_Re{Re}"] = float(relative_l2(v_c, jnp.asarray(tab["v"][1:-1])))
+            except KeyError:
+                pass
         return out

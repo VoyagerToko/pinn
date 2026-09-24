@@ -175,6 +175,8 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         p.Re_min = 100.0
         p.Re_max = 1000.0
         p.eval_Re = (100, 400, 1000)
+        p.holdout_Re_band = (300.0, 530.0)  # never sampled in training: Re = 400 is a zero-shot query
+        p.zero_shot_Re = 400
         c.arch = ml_collections.ConfigDict(
             {
                 "arch_name": "DeepONet",

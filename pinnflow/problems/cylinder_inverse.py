@@ -22,6 +22,7 @@ from ..data import load_cylinder_wake, sample_sparse
 from ..losses import align_pressure_gauge, mse
 from ..metrics import relative_l2
 from ..sampling import uniform_box
+from ..utils import chunked_vmap
 from .base import Problem
 
 
@@ -43,10 +44,15 @@ class CylinderWakeInversePINN(Problem):
         if self.noise > 0:
             rng = np.random.default_rng(int(config.seed))
             self.train_uv = self.train_uv + self.noise * jnp.std(self.train_uv, axis=0) * jnp.asarray(rng.standard_normal(self.train_uv.shape))
-        # validation snapshot (t index 100): all 5000 points
-        k = 100
-        self.val_pts = jnp.concatenate([jnp.full((data["X_star"].shape[0], 1), float(data["t"][k])), jnp.asarray(data["X_star"])], axis=1)
-        self.val_uvp = jnp.stack([data["U_star"][:, 0, k], data["U_star"][:, 1, k], data["p_star"][:, k]], -1)
+        # validation: every 10th snapshot (20 of 200), all 5000 points each. The training data are a random
+        # 5000-point subset of the 10^6 space-time samples, so these points are almost all unseen.
+        ks = np.arange(0, data["t"].shape[0], 10)
+        N = data["X_star"].shape[0]
+        self.n_val_snap = len(ks)
+        self.val_pts = jnp.concatenate(
+            [jnp.concatenate([jnp.full((N, 1), float(data["t"][k])), jnp.asarray(data["X_star"])], axis=1) for k in ks], axis=0
+        )
+        self.val_uvp = jnp.concatenate([jnp.stack([data["U_star"][:, 0, k], data["U_star"][:, 1, k], data["p_star"][:, k]], -1) for k in ks], axis=0)
 
     # ------------------------------------------------------------------
     def init_params(self, key):
@@ -96,7 +102,11 @@ class CylinderWakeInversePINN(Problem):
 
     def evaluate(self, params) -> Dict[str, float]:
         lam1, lam2 = self.lambdas(params)
-        pred = jax.vmap(self.velocity_fn(params))(self.val_pts)
+        pred = chunked_vmap(self.velocity_fn(params), self.val_pts, chunk=20000)
+        # hidden pressure: unique only up to a function of time -> align the mean per snapshot
+        p_pred = pred[:, 2].reshape(self.n_val_snap, -1)
+        p_ref = self.val_uvp[:, 2].reshape(self.n_val_snap, -1)
+        p_al = jax.vmap(align_pressure_gauge)(p_pred, p_ref).ravel()
         return {
             "lambda1": float(lam1),
             "lambda2": float(lam2),
@@ -104,5 +114,5 @@ class CylinderWakeInversePINN(Problem):
             "lambda2_err_pct": float(100 * abs(lam2 - self.bench.nu_true) / self.bench.nu_true),
             "rel_l2_u": float(relative_l2(pred[:, 0], self.val_uvp[:, 0])),
             "rel_l2_v": float(relative_l2(pred[:, 1], self.val_uvp[:, 1])),
-            "rel_l2_p": float(relative_l2(align_pressure_gauge(pred[:, 2], self.val_uvp[:, 2]), self.val_uvp[:, 2])),
+            "rel_l2_p": float(relative_l2(p_al, self.val_uvp[:, 2])),
         }
