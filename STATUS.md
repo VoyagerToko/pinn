@@ -35,6 +35,7 @@ already in use on the card before the run (the Windows desktop holds ~2.1 GB).
 | 2026-09-24 | cavity_F_r2_killed | row F with the fixes of 24f0b1c | interrupted at step 63.7k: WSL shut the distro down when no terminal was attached (fixed with `instanceIdleTimeout=-1`, `vmIdleTimeout=-1` in `%USERPROFILE%\.wslconfig`); end of the Re=100 stage: Ghia u 3.7%, v 11.4% | - | 0.026 s | - |
 | 2026-09-24 | cavity_F_r2 | row F with the fixes of 24f0b1c, 200k Adam + 20k L-BFGS | Re=1000 final: Ghia u 19.8%, v 20.2%, speed 24.5% (before L-BFGS 19.5% / 19.8% / 24.3%); Re=400: 17.9% / 24.8%; Re=100: 3.8% / 12.2%; velocity vs FD regularised-lid solution 26.1% (N=512) | 8278 s (Adam 4.9k s, L-BFGS 3.3k s) | 0.024 s (L-BFGS 0.17 s/iter) | 1.58 GB / 2.6 GB |
 | 2026-09-24 | cavity_C_r2 | row C (soft BC, fixed weights) under the current code, same budget; L-BFGS stopped by the stall rule after ~9k iterations at loss 2.7e-7 | Re=1000 final: Ghia u 0.63%, v 2.05% (gate missed on v by 0.05 points), speed vs JAX-PI 4.2%, **velocity vs FD regularised-lid solution 0.27% (N=512; 0.44% vs N=256)**; Re=400: 3.1% / 5.5%; Re=100: 1.5% / 4.7% | 5721 s | 0.025 s | 1.59 GB / 2.6 GB |
+| 2026-09-24 | cavity_D | row D (hard BC, fixed weights; row E is identical for a steady problem, causal weighting is off) | Re=1000 final: Ghia u 21.3%, v 19.8%, velocity vs FD (N=512) 28.3%; Re=400: 7.0% / 8.7% (FD 10.0%); Re=100: 3.6% / 8.8% (FD 7.9%) | 10023 s | 0.024 s | 1.59 GB / 2.6 GB |
 | 2026-09-24 | tgv2d_G (re-evaluated) | cost numbers for the 2026-09-22 run | unchanged errors; inference 3.9e6 points/s (stream function, 65k batch) | - | 0.139 s | - |
 | 2026-09-24 | probes (300-2100 steps, `runs/_probe_*`) | step time / memory before the long runs | tgv3d SPINN 32^4: 0.044 s/step, 3.1 GB, ~5 min compile; **64^4: out of memory** (one 11.1 GB buffer; the card has ~13.9 GB free); cylinder row G: 0.089 s/step with remat, 0.55 GB, plus ~10% for the grad-norm/RAD/causal updates every 1000 steps | - | - | - |
 
@@ -53,8 +54,8 @@ satisfies the boundary data and div u = 0 at both corners, so div u ~ 10 in two 
 is exactly a mean-square floor of ~0.04. The lid extension exponent (y^8) and the per-stage lr restart do not
 touch this. The soft constraint (row C) can trade a small lid error in the corners against continuity, and
 JAX-PI's own cavity example also treats the lid softly and avoids sampling its corners.
-Next: row C and row D (hard, fixed weights) under the same code tell whether the adaptive weights make the
-floor worse; `problem.lid_bc="soft"` (exact no-slip on the three fixed walls and exact v = 0 on the lid, lid
+Row D (hard lid, fixed weights, same code) fails the same way (Ghia 21.3% / 19.8%, 28.3% from the FD solution),
+so the adaptive weighting is not the cause: the fully hard lid constraint is. Fix: `problem.lid_bc="soft"` (exact no-slip on the three fixed walls and exact v = 0 on the lid, lid
 velocity as a loss term) removes the incompatibility while keeping the hard constraint where it is compatible.
 It is queued as `cavity_F_softlid`.
 
