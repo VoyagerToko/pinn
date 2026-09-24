@@ -170,6 +170,9 @@ Row A-C configs (VP formulation, second order) are about 3x cheaper per step tha
 
 ## 7. Deviations from the handbook and things to know
 
+See also `CLAUDE.md` (project brief for assistants and contributors), `STATUS.md` (benchmark results and open
+issues) and `docs/PINN_Implementation_Handbook.md` (the handbook this code implements).
+
 * **Windows**: GPU JAX only inside WSL2. Native env is CPU (fine for tests/eval/viz).
 * **Strouhal target**: the handbook quotes St ~ 0.16-0.17 for Re=100; that holds for the *unconfined* cylinder
   (Raissi wake data). For the confined DFG 2D-2 channel the published interval is St in [0.295, 0.305]
