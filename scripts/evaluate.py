@@ -63,13 +63,34 @@ def eval_cylinder(cfg, workdir: Path, dt_eval: float = 0.005):
     if len(series["t"]) > 20:
         St, f = M.strouhal(series["t"], series["Cl"], D=bench.diameter, U=bench.U_ref)
         out.update({"St": St, "f": f, **M.periodic_cycle_stats(series["t"], series["Cd"], series["Cl"])})
+        last = series["t"] >= series["t"][-1] - 1.0  # shedding present? lift amplitude over the last second
+        out["Cl_amp_last_1s"] = float(np.ptp(series["Cl"][last]))
     for k, (lo, hi) in bench.reference.items():
         if k.startswith(bench.variant):
             out[f"ref/{k}"] = [lo, hi]
+    if bench.variant == "2D-2" and "St" in out:
+        # STEP 10 gates: St within 3 % of 0.30 (confined channel), Cd_max within 5 % of 3.23
+        out["gate/St_rel_err"] = abs(out["St"] - 0.30) / 0.30
+        out["gate/Cd_max_rel_err"] = abs(out["Cd_max"] - 3.23) / 3.23
+        out["gate/Cl_max_rel_err"] = abs(out["Cl_max"] - 1.00) / 1.00
+        out["gate/passed"] = bool(out["gate/St_rel_err"] < 0.03 and out["gate/Cd_max_rel_err"] < 0.05)
+    # causal weights at the end of each window (handbook 5.4: training should end with min w ~ 1 at the largest eps)
+    import csv
+
+    for w in windows:
+        f_ = w / "metrics.csv"
+        if f_.exists():
+            rows = [r for r in csv.DictReader(open(f_)) if r.get("causal/min_w") not in (None, "")]
+            if rows:
+                out[f"{w.name}/causal_min_w_final"] = float(rows[-1]["causal/min_w"])
+                out[f"{w.name}/causal_eps_final"] = float(rows[-1]["causal/eps"])
+    ref = None
     try:
         ref = load_featflow_series("draglift", bench.variant)
         out["featflow/Cd_max"] = float(ref["Cd"][len(ref["Cd"]) // 2 :].max())
+        out["featflow/Cd_min"] = float(ref["Cd"][len(ref["Cd"]) // 2 :].min())
         out["featflow/Cl_max"] = float(ref["Cl"][len(ref["Cl"]) // 2 :].max())
+        out["featflow/St"] = float(M.strouhal(ref["t"], ref["Cl"], D=bench.diameter, U=bench.U_ref)[0])
         out["featflow/file"] = ref["file"]
     except FileNotFoundError:
         pass
@@ -79,15 +100,24 @@ def eval_cylinder(cfg, workdir: Path, dt_eval: float = 0.005):
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        fig, ax = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
-        ax[0].plot(series["t"], series["Cd"], label="PINN")
-        ax[1].plot(series["t"], series["Cl"], label="PINN")
-        try:
-            ax[0].plot(ref["t"], ref["Cd"], "k--", lw=0.8, label="FEATFLOW")
-            ax[1].plot(ref["t"], ref["Cl"], "k--", lw=0.8, label="FEATFLOW")
-        except Exception:
-            pass
-        ax[0].set_ylabel("C_D"), ax[1].set_ylabel("C_L"), ax[1].set_xlabel("t [s]"), ax[0].legend()
+        fig, ax = plt.subplots(2, 2, figsize=(14, 6), gridspec_kw={"width_ratios": [2, 1]})
+        ax[0, 0].plot(series["t"], series["Cd"], label="PINN")
+        ax[1, 0].plot(series["t"], series["Cl"], label="PINN")
+        ax[0, 0].set_ylabel("C_D"), ax[1, 0].set_ylabel("C_L"), ax[1, 0].set_xlabel("t [s]"), ax[0, 0].set_title("PINN, whole run (time windows of %.2f s)" % dt)
+        # last 1 s: FEATFLOW's series is already periodic at its t = 0, so shift it to put its lift maximum on the
+        # PINN's last lift maximum (the phase of a periodic state is arbitrary; amplitude, mean and period are not)
+        last = series["t"] >= series["t"][-1] - 1.0
+        tp, cdp, clp = series["t"][last], series["Cd"][last], series["Cl"][last]
+        ax[0, 1].plot(tp, cdp, label="PINN")
+        ax[1, 1].plot(tp, clp, label="PINN")
+        if ref is not None:
+            half = ref["t"] > ref["t"][-1] / 2
+            t_ref, cd_ref, cl_ref = ref["t"][half], ref["Cd"][half], ref["Cl"][half]
+            shift = tp[int(np.argmax(clp))] - t_ref[int(np.argmax(cl_ref[: max(1, int(len(t_ref) * 0.2))]))]
+            m = (t_ref + shift >= tp[0]) & (t_ref + shift <= tp[-1])
+            ax[0, 1].plot(t_ref[m] + shift, cd_ref[m], "k--", lw=0.9, label="FEATFLOW (phase-aligned)")
+            ax[1, 1].plot(t_ref[m] + shift, cl_ref[m], "k--", lw=0.9, label="FEATFLOW (phase-aligned)")
+        ax[0, 1].legend(fontsize=8), ax[1, 1].set_xlabel("t [s]"), ax[0, 1].set_title("last second")
         fig.tight_layout(), fig.savefig(workdir / "drag_lift.png", dpi=130)
     except Exception as e:  # plotting is optional
         print("plot skipped:", e)
