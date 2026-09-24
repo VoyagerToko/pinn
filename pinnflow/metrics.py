@@ -149,13 +149,24 @@ def inertial_range_slope(k: np.ndarray, E: np.ndarray, kmin: int = 4, kmax: int 
 
 
 # 7.6 ------------------------------------------------------------------------------------
-def inference_throughput(fn: Callable, pts: Array, repeats: int = 3) -> float:
-    """Query points per second for a batched, jitted evaluation."""
+def inference_throughput(fn: Callable, pts: Array, repeats: int = 3, chunk: int = None) -> float:
+    """Query points per second for a batched, jitted evaluation.
+
+    With ``chunk`` the points are streamed through one compiled batch of ``chunk`` points (the way a
+    large query would be served); without it the whole array is a single batch.
+    """
     import time
 
     f = jax.jit(fn)
-    f(pts).block_until_ready()
+    if chunk is None or chunk >= pts.shape[0]:
+        batches = [pts]
+    else:
+        n = (pts.shape[0] // chunk) * chunk
+        batches = [pts[s : s + chunk] for s in range(0, n, chunk)]
+    jax.block_until_ready(f(batches[0]))
     t0 = time.perf_counter()
     for _ in range(repeats):
-        f(pts).block_until_ready()
-    return pts.shape[0] * repeats / (time.perf_counter() - t0)
+        for b in batches:
+            out = f(b)
+        jax.block_until_ready(out)
+    return sum(b.shape[0] for b in batches) * repeats / (time.perf_counter() - t0)

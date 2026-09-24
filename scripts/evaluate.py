@@ -230,7 +230,8 @@ def cost_summary(workdir: Path, throughput_fn=None, n_points: int = 1 << 18, dim
     if throughput_fn is not None and dim_box is not None:
         box = np.asarray(dim_box, dtype=np.float32)
         pts = jnp.asarray(np.random.default_rng(0).uniform(box[:, 0], box[:, 1], (n_points, box.shape[0])).astype(np.float32))
-        out["cost/inference_pts_per_s"] = float(M.inference_throughput(throughput_fn, pts))
+        out["cost/inference_pts_per_s"] = float(M.inference_throughput(throughput_fn, pts, chunk=1 << 16))
+        out["cost/inference_batch"] = 1 << 16
     return out
 
 
