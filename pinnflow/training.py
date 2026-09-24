@@ -94,7 +94,9 @@ class Trainer:
         self.causal = bool(config.weighting.get("use_causal", False))
         self.annealer = L.CausalAnnealer(tuple(config.weighting.get("causal_eps_schedule", (1e-2, 1e-1, 1.0, 10.0, 100.0)))) if self.causal else None
         if self.causal and hasattr(problem, "set_causal_eps"):
-            problem.set_causal_eps(config.weighting.get("causal_tol", self.annealer.eps))
+            # start at the first entry of the annealing schedule (handbook 5.4); starting at causal_tol
+            # made the first "advance" lower eps and the logged causal/eps differ from the one in use
+            problem.set_causal_eps(self.annealer.eps)
         self.logger = CSVLogger(self.workdir / "metrics.csv")
         self.wandb = None
         if use_wandb:
