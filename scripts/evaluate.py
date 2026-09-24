@@ -13,6 +13,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Dict
 
 import numpy as np
 
@@ -120,6 +121,55 @@ def eval_tgv3d(cfg, workdir: Path, n_hist: int = 32, spectrum_n: int = 64, n_tim
     return out
 
 
+def step_time(workdir: Path) -> Dict[str, float]:
+    """Median seconds per Adam step from metrics.csv (``time`` restarts at every stage/window, so
+    only consecutive rows of the same stage are differenced; the first interval holds the compile)."""
+    import csv
+
+    files = sorted(workdir.glob("window_*/metrics.csv")) or [workdir / "metrics.csv"]
+    rates = []
+    for f in files:
+        if not f.exists():
+            continue
+        rows = [r for r in csv.DictReader(open(f)) if not r.get("loss/lbfgs")]
+        for a, b in zip(rows, rows[1:]):
+            ta, tb, sa, sb = float(a["time"]), float(b["time"]), float(a["step"]), float(b["step"])
+            if tb > ta and sb > sa:  # same stage (time restarts per stage/window)
+                rates.append((tb - ta) / (sb - sa))
+    out = {}
+    if rates:
+        out["cost/step_time_s"] = float(np.median(rates))
+    peak = []
+    for f in files:
+        if f.exists():
+            peak += [float(r["mem/peak_gb"]) for r in csv.DictReader(open(f)) if r.get("mem/peak_gb") not in (None, "", "nan")]
+    if peak:
+        out["cost/jax_peak_gb"] = float(max(peak))
+    return out
+
+
+def cost_summary(workdir: Path, throughput_fn=None, n_points: int = 1 << 18, dim_box=None) -> Dict[str, float]:
+    """Handbook 7.6: training wall-clock (cost.json written by scripts/run_job.sh), step time, peak memory
+    (JAX allocator and nvidia-smi samples), inference throughput in query points per second."""
+    out = step_time(workdir)
+    cj = workdir / "cost.json"
+    if cj.exists():
+        c = json.loads(cj.read_text())
+        out["cost/train_wall_s"] = float(c.get("train_wall_s", float("nan")))
+        base = float(c.get("gpu_baseline_mib", 0.0))
+        gpu = workdir.parent / f"{workdir.name}.gpu.csv"
+        if gpu.exists():
+            used = [float(l.split(",")[1]) for l in gpu.read_text().splitlines() if l.count(",") >= 2]
+            if used:
+                out["cost/nvidia_smi_peak_mib"] = max(used)
+                out["cost/nvidia_smi_peak_minus_baseline_mib"] = max(used) - base
+    if throughput_fn is not None and dim_box is not None:
+        box = np.asarray(dim_box, dtype=np.float32)
+        pts = jnp.asarray(np.random.default_rng(0).uniform(box[:, 0], box[:, 1], (n_points, box.shape[0])).astype(np.float32))
+        out["cost/inference_pts_per_s"] = float(M.inference_throughput(throughput_fn, pts))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--benchmark", required=True, choices=sorted(PROBLEMS))
@@ -129,10 +179,36 @@ def main():
     args = ap.parse_args()
     workdir = Path(args.workdir)
     cfg = load_cfg(workdir)
+    thr_fn, box = None, None
     if args.benchmark == "cylinder":
         out = eval_cylinder(cfg, workdir)
+        last = sorted(workdir.glob("window_*"))[-1]
+        idx = int(last.name.split("_")[1])
+        dt = float(cfg.problem.window_dt)
+        problem = DFGCylinderPINN(cfg, t0=idx * dt, t1=(idx + 1) * dt)
+        params = restore(problem, last / "latest.msgpack")
+        thr_fn = jax.vmap(problem.velocity_dim_fn(params))
+        box = [[idx * dt, (idx + 1) * dt], [0.0, problem.bench.length], [0.0, problem.bench.height]]
     elif args.benchmark == "tgv3d":
         out = eval_tgv3d(cfg, workdir, spectrum_n=args.spectrum_n)
+        problem = PROBLEMS["tgv3d"](cfg)
+        params = restore(problem, workdir / args.checkpoint)
+        vel = problem.velocity_fn(params)
+        thr_fn = jax.vmap(lambda z: vel(z)[:3])
+        box = np.asarray(problem.dom)
+        # separable evaluation: 64^3 spatial grid at one time instant = n^3 points per call
+        from pinnflow.sampling import linspace_axes
+
+        axes = linspace_axes(problem.dom[1:], (64, 64, 64))
+        grid = jax.jit(lambda t: problem.velocity_grid(params, [t, *axes]))
+        t1 = jnp.asarray([9.0])
+        grid(t1).block_until_ready()
+        import time as _time
+
+        s = _time.perf_counter()
+        for _ in range(3):
+            grid(t1).block_until_ready()
+        out["cost/inference_grid_pts_per_s"] = float(3 * 64**3 / (_time.perf_counter() - s))
     else:
         problem = PROBLEMS[args.benchmark](cfg)
         if args.benchmark == "cavity":
@@ -142,10 +218,23 @@ def main():
                 problem.set_Re(Re)
                 params = restore(problem, ck)
                 out.update({f"Re{Re}/{k}": v for k, v in problem.evaluate(params).items()})
-            if not out:
-                out = problem.evaluate(restore(problem, workdir / args.checkpoint))
+            # Re*.msgpack are written after each Adam stage; latest.msgpack also includes L-BFGS
+            Re_final = int(list(cfg.problem.curriculum_Re)[-1])
+            problem.set_Re(Re_final)
+            params = restore(problem, workdir / args.checkpoint)
+            out.update({f"final_Re{Re_final}/{k}": v for k, v in problem.evaluate(params).items()})
+            thr_fn = jax.vmap(problem.velocity_fn(params))
+            box = np.asarray(problem.dom)
         else:
-            out = problem.evaluate(restore(problem, workdir / args.checkpoint))
+            params = restore(problem, workdir / args.checkpoint)
+            out = problem.evaluate(params)
+            if args.benchmark == "deeponet_cavity":
+                Re_eval = float(cfg.problem.get("zero_shot_Re", 1000))
+                thr_fn = jax.vmap(problem.net(params, Re_eval))
+            else:
+                thr_fn = jax.vmap(problem.velocity_fn(params))
+            box = np.asarray(problem.dom)
+    out.update(cost_summary(workdir, thr_fn, dim_box=box))
     (workdir / "eval.json").write_text(json.dumps(out, indent=2, default=str))
     for k, v in out.items():
         print(f"{k:>40s} : {v}")

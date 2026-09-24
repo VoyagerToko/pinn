@@ -150,11 +150,14 @@ def plot_cavity(cfg, workdir: Path, ckpt: str, n: int):
     problem = PROBLEMS["cavity"](cfg)
     out = workdir / "figures"
     out.mkdir(exist_ok=True)
-    ckpts = sorted(workdir.glob("Re*.msgpack")) or [workdir / ckpt]
+    # Re*.msgpack are saved after each Adam stage; the checkpoint (latest.msgpack) also includes L-BFGS
+    Re_final = int(list(cfg.problem.get("curriculum_Re", [cfg.problem.Re]))[-1])
+    ckpts = [(int(c.stem[2:]), c, "") for c in sorted(workdir.glob("Re*.msgpack"))]
+    if (workdir / ckpt).exists():
+        ckpts.append((Re_final, workdir / ckpt, "_final"))
     g = np.linspace(0, 1, n)
     X, Y = np.meshgrid(g, g, indexing="ij")
-    for ck in ckpts:
-        Re = int(ck.stem[2:]) if ck.stem.startswith("Re") else int(round(float(cfg.problem.Re)))
+    for Re, ck, tag in ckpts:
         problem.set_Re(Re)
         params = restore(problem, ck)
         vel = problem.velocity_fn(params)
@@ -164,7 +167,7 @@ def plot_cavity(cfg, workdir: Path, ckpt: str, n: int):
         fig, ax = plt.subplots(1, 3, figsize=(16, 5))
         sp = ax[0].pcolormesh(X, Y, np.hypot(U, V), cmap="viridis", shading="auto")
         ax[0].streamplot(g, g, U.T, V.T, color="w", density=1.4, linewidth=0.6)
-        ax[0].set_title(f"speed + streamlines, Re={Re}")
+        ax[0].set_title(f"speed + streamlines, Re={Re}" + (" (after L-BFGS)" if tag else ""))
         fig.colorbar(sp, ax=ax[0])
         vo = ax[1].pcolormesh(X, Y, np.clip(W, -10, 10), cmap="RdBu_r", shading="auto")
         ax[1].set_title("vorticity (clipped to +-10)")
@@ -186,7 +189,7 @@ def plot_cavity(cfg, workdir: Path, ckpt: str, n: int):
         except KeyError:
             ax[2].axis("off")
         fig.tight_layout()
-        f = out / f"cavity_Re{Re}.png"
+        f = out / f"cavity_Re{Re}{tag}.png"
         fig.savefig(f, dpi=130)
         plt.close(fig)
         print("saved", f)

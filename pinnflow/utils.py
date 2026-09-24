@@ -23,6 +23,15 @@ def chunked_vmap(fn: Callable, pts: jnp.ndarray, chunk: int = 8192, **vmap_kwarg
     return jax.tree_util.tree_map(lambda *xs: jnp.concatenate(xs, axis=0), *outs) if len(outs) > 1 else outs[0]
 
 
+def device_peak_gb() -> float:
+    """Peak bytes held by this process's allocator on the first device, in GB (nan on CPU)."""
+    try:
+        stats = jax.local_devices()[0].memory_stats() or {}
+        return float(stats.get("peak_bytes_in_use", float("nan"))) / 1e9
+    except Exception:
+        return float("nan")
+
+
 def count_params(params) -> int:
     return int(sum(np.prod(x.shape) for x in jax.tree_util.tree_leaves(params)))
 

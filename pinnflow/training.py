@@ -33,7 +33,7 @@ from flax import struct
 from flax.training import train_state
 
 from . import losses as L
-from .utils import CSVLogger, count_params, load_params, save_params
+from .utils import CSVLogger, count_params, device_peak_gb, load_params, save_params
 
 
 # --------------------------------------------------------------------------------------
@@ -160,7 +160,7 @@ class Trainer:
 
             gstep = step + self.step_offset
             if step % log_every == 0 or step == max_steps - 1:
-                row = {"step": gstep, "loss": float(loss), "time": time.perf_counter() - t0}
+                row = {"step": gstep, "loss": float(loss), "time": time.perf_counter() - t0, "mem/peak_gb": device_peak_gb()}
                 row.update({f"loss/{k}": float(v) for k, v in terms.items()})
                 row.update({f"w/{k}": float(v) for k, v in self.state.weights.items()})
                 if self.causal and self._causal_min is not None:
@@ -205,7 +205,9 @@ class Trainer:
         def loss_fn(params):
             return L.weighted_total(self.problem.losses(params, batch), weights)
 
-        params = run_lbfgs(loss_fn, self.state.params, max_iters, memory_size=memory_size, log_every=log_every, tol=tol, logger=lambda i, v: self._log({"step": self.step_offset + i, "loss": v, "time": 0.0, "loss/lbfgs": v}))
+        t0 = time.perf_counter()
+        log = lambda i, v: self._log({"step": self.step_offset + i, "loss": v, "time": time.perf_counter() - t0, "mem/peak_gb": device_peak_gb(), "loss/lbfgs": v})
+        params = run_lbfgs(loss_fn, self.state.params, max_iters, memory_size=memory_size, log_every=log_every, tol=tol, logger=log)
         self.state = self.state.replace(params=params)
         self.step_offset += max_iters
         self.save("latest_lbfgs.msgpack")
