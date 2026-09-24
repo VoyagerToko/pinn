@@ -194,6 +194,31 @@ def plot_cavity(cfg, workdir: Path, ckpt: str, n: int):
         plt.close(fig)
         print("saved", f)
 
+        # residual maps (where the physics is violated) and the error against the JAX-PI reference field
+        r = problem.residual_fn(params, float(Re))
+        r_mom, div = chunked_vmap(r, pts, chunk=16384)
+        fig, ax = plt.subplots(1, 3, figsize=(16, 4.8))
+        for a, arr, name in ((ax[0], np.abs(np.asarray(div)), "log10 |div u|"), (ax[1], np.linalg.norm(np.asarray(r_mom), axis=1), "log10 |momentum residual|")):
+            im = a.pcolormesh(X, Y, np.log10(arr.reshape(n, n) + 1e-12), cmap="magma", vmin=-6, shading="auto")
+            a.set_title(name), a.set_aspect("equal"), fig.colorbar(im, ax=a)
+        try:
+            from pinnflow.data import load_jaxpi_cavity
+
+            ref = load_jaxpi_cavity(Re)
+            RX, RY = np.meshgrid(ref["x"], ref["y"], indexing="ij")
+            pr = chunked_vmap(vel, jnp.stack([jnp.asarray(RX.ravel()), jnp.asarray(RY.ravel())], -1))
+            err = np.abs(np.hypot(np.asarray(pr[:, 0]), np.asarray(pr[:, 1])).reshape(RX.shape) - np.hypot(ref["u"], ref["v"]))
+            # log scale: the JAX-PI field has a unit lid, so the top corners differ by O(1) by construction
+            im = ax[2].pcolormesh(RX, RY, np.log10(err + 1e-12), cmap="magma", vmin=-4, shading="auto")
+            ax[2].set_title("log10 |speed error| vs JAX-PI reference"), ax[2].set_aspect("equal"), fig.colorbar(im, ax=ax[2])
+        except Exception as e:
+            ax[2].set_title(f"no reference field ({e})")
+        fig.tight_layout()
+        f = out / f"cavity_Re{Re}{tag}_residuals.png"
+        fig.savefig(f, dpi=130)
+        plt.close(fig)
+        print("saved", f)
+
 
 # --------------------------------------------------------------------------------------
 # Benchmark C
