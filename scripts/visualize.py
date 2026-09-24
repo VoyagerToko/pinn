@@ -41,6 +41,7 @@ def main():
     ap.add_argument("--no-render", action="store_true")
     ap.add_argument("--particles", type=int, default=0)
     ap.add_argument("--speed-max", type=float, default=1.0, help="upper end of the fixed colour range (|u| <= 1 for the TGV initial condition)")
+    ap.add_argument("--pointwise", action="store_true", help="sample with point-wise Jacobians instead of the separable grid mode")
     args = ap.parse_args()
     workdir = Path(args.workdir)
     cfg = ml_collections.ConfigDict(json.loads((workdir / "config.json").read_text()))
@@ -58,7 +59,10 @@ def main():
         print("particle trajectories ->", workdir / "particles.npz")
 
     out = workdir / "frames"
-    viz.export_frames(vel_p, out, n=args.n, times=times)
+    if args.pointwise:
+        viz.export_frames(vel_p, out, n=args.n, times=times)
+    else:  # separable grid evaluation (SPINN): exact AD derivatives along each axis, far cheaper than per-point Jacobians
+        viz.export_frames_grid(lambda t: problem.grid_fields(params, t, args.n), out, n=args.n, times=times)
     print(f"{args.frames} .vti frames ->", out)
     if not args.no_render:
         import pyvista as pv

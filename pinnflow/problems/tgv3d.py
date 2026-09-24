@@ -134,6 +134,32 @@ class TaylorGreen3DSPINN(Problem):
             Z.append(float(enstrophy(omega)))
         return {"t": np.asarray(times), "Ek": np.asarray(Ek), "enstrophy": np.asarray(Z)}
 
+    def grid_fields(self, params, t: float, n: int) -> Dict[str, np.ndarray]:
+        """Velocity, speed, vorticity and Q on an n^3 grid at time t in separable (grid) mode - one network
+        evaluation per axis instead of n^3 point-wise Jacobians. Arrays are flattened in 'ij' order
+        (x slowest), the layout of :func:`pinnflow.viz.sample_grid`."""
+        if not hasattr(self, "_grid_fields_jit"):
+            self._grid_fields_jit = {}
+        if n not in self._grid_fields_jit:
+            axes = linspace_axes(self.dom[1:], (n, n, n))
+
+            def core(params, t):
+                coords = [jnp.reshape(t, (1,)), *axes]
+                vf = self.velocity_grid_fn(params)
+                vel = vf(*coords)[:3, 0]
+                _, first, _ = physics.grid_derivatives(lambda *c: vf(*c)[:3], coords)
+                dU = jnp.stack([first[s][:, 0] for s in (1, 2, 3)], axis=1)  # dU[i, j] = d u_i / d x_j, (3, 3, n, n, n)
+                omega = jnp.einsum("ijk,kj...->i...", physics._EPS, dU)
+                S = 0.5 * (dU + jnp.swapaxes(dU, 0, 1))
+                O = 0.5 * (dU - jnp.swapaxes(dU, 0, 1))
+                q = 0.5 * (jnp.sum(O * O, axis=(0, 1)) - jnp.sum(S * S, axis=(0, 1)))
+                return vel, omega, q
+
+            self._grid_fields_jit[n] = jax.jit(core)
+        vel, omega, q = self._grid_fields_jit[n](params, jnp.asarray(float(t)))
+        v = np.asarray(vel).reshape(3, -1).T
+        return {"velocity": v, "speed": np.linalg.norm(v, axis=1), "vorticity": np.asarray(omega).reshape(3, -1).T, "qcriterion": np.asarray(q).ravel()}
+
     def evaluate(self, params) -> Dict[str, float]:
         axes = self.eval_axes
         vel0 = self.velocity_grid(params, [jnp.zeros(1), *axes])[:3, 0]

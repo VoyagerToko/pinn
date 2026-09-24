@@ -49,12 +49,20 @@ def sample_field(vel_p_fn: Callable, t: float, pts: np.ndarray, chunk: int = 655
 
 
 def fields_to_vti(fields: dict, n: int, spacing: float, path: os.PathLike):
-    """9.1 write point data on an n^3 ImageData grid (.vti) for ParaView / PyVista."""
+    """9.1 write point data on an n^3 ImageData grid (.vti) for ParaView / PyVista.
+
+    ``fields`` hold point values in the order of :func:`sample_grid` ('ij' meshgrid, x slowest). VTK image
+    data store x fastest, so every array is transposed to (z, y, x) before it is attached; without this the
+    written field has x and z swapped.
+    """
     import pyvista as pv
 
     grid = pv.ImageData(dimensions=(n, n, n), spacing=(spacing,) * 3)
     for k, v in fields.items():
-        grid[k] = v
+        v = np.asarray(v)
+        comps = v.shape[1:] if v.ndim > 1 else ()
+        vv = v.reshape(n, n, n, *comps).transpose(2, 1, 0, *range(3, 3 + len(comps)))
+        grid[k] = vv.reshape(n**3, *comps)
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     grid.save(str(path))
     return grid
@@ -74,6 +82,21 @@ def export_frames(vel_p_fn: Callable, out_dir: os.PathLike, n: int = 128, times:
     spacing = g[1] - g[0]
     for frame, t in enumerate(times):
         f = sample_field(vel_p_fn, float(t), pts, with_gradients=with_q)
+        grid = fields_to_vti(f, n, spacing, out_dir / f"frame_{frame:04d}.vti")
+        if with_q:
+            q_isosurface(grid).save(str(out_dir / f"q_{frame:04d}.vtp"))
+
+
+def export_frames_grid(field_fn: Callable, out_dir: os.PathLike, n: int, times: Sequence[float], L: float = 2 * np.pi, with_q: bool = True):
+    """Same output as :func:`export_frames`, for models that evaluate whole grids at once (SPINN).
+
+    ``field_fn(t) -> dict(velocity (n^3, 3), speed, vorticity (n^3, 3), qcriterion)`` in sample_grid order.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    spacing = L / n
+    for frame, t in enumerate(times):
+        f = field_fn(float(t))
         grid = fields_to_vti(f, n, spacing, out_dir / f"frame_{frame:04d}.vti")
         if with_q:
             q_isosurface(grid).save(str(out_dir / f"q_{frame:04d}.vtp"))
