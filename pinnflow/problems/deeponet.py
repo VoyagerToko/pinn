@@ -16,7 +16,7 @@ import numpy as np
 
 from .. import physics
 from ..benchmarks import LidDrivenCavity, ghia_tables
-from ..constraints import hard_dirichlet, lid_extension, phi_unit_square
+from ..constraints import hard_dirichlet, lid_extension, phi_unit_square, phi_unit_square_open_top
 from ..data import load_jaxpi_cavity
 from ..losses import mse, pressure_anchor_closed
 from ..metrics import relative_l2
@@ -39,6 +39,10 @@ class ParametricCavityDeepONet(Problem):
         band = config.problem.get("holdout_Re_band", None)
         self.holdout = None if band is None else (float(band[0]), float(band[1]))
         self.zero_shot_Re = config.problem.get("zero_shot_Re", None)
+        # same boundary treatment options as CavityPINN (see problems/cavity.py for the lid_bc="soft" rationale)
+        self.soft_lid = config.problem.get("lid_bc", "hard") == "soft"
+        if self.soft_lid:
+            self.init_weights.setdefault("u_lid", 1.0)
 
     def init_params(self, key):
         return self.arch.init(key, jnp.zeros(1), jnp.zeros(self.input_dim))
@@ -48,8 +52,12 @@ class ParametricCavityDeepONet(Problem):
 
     def net(self, params, Re):
         raw = lambda z: self.arch.apply(params, self.encode_Re(Re), z)
-        g = lid_extension(self.bench.lid_profile)
-        return hard_dirichlet(raw, lambda z: g(z[0], z[1]), lambda z: phi_unit_square(z[0], z[1]), constrained=(0, 1))
+        g = lid_extension(self.bench.lid_profile, power=float(self.config.problem.get("lid_power", 8.0)))
+        if self.soft_lid:
+            phi = lambda z: jnp.stack([phi_unit_square_open_top(z[0], z[1]), phi_unit_square(z[0], z[1])])
+        else:
+            phi = lambda z: phi_unit_square(z[0], z[1])
+        return hard_dirichlet(raw, lambda z: g(z[0], z[1]), phi, constrained=(0, 1))
 
     def residual_fn(self, params, Re):
         return physics.ns_vp_residual(self.net(params, Re), Re, dim=2, unsteady=False)
@@ -66,17 +74,23 @@ class ParametricCavityDeepONet(Problem):
             b0, b1 = np.log10(self.holdout[0]), np.log10(self.holdout[1])
             s = jax.random.uniform(k1, (self.n_Re,), minval=lo, maxval=hi - (b1 - b0))
             Re = 10 ** jnp.where(s < b0, s, s + (b1 - b0))
+        k2, k3 = jax.random.split(k2)
         res = uniform_box(k2, self.dom, int(cfg.res_batch_size))
-        return {"Re": Re, "res": res}
+        x_lid = jax.random.uniform(k3, (int(cfg.get("bc_batch_size", 2048)) // 4,))
+        return {"Re": Re, "res": res, "lid": jnp.stack([x_lid, jnp.ones_like(x_lid)], -1)}
 
     def losses(self, params, batch) -> Dict[str, jnp.ndarray]:
         def per_Re(Re):
             r_mom, r_c = self.vmap_pointwise(self.residual_fn(params, Re))(batch["res"])
             p = jax.vmap(self.net(params, Re))(batch["res"])[:, 2]
-            return mse(r_mom[:, 0]), mse(r_mom[:, 1]), mse(r_c), pressure_anchor_closed(p)
+            u_top = jax.vmap(self.net(params, Re))(batch["lid"])[:, 0]
+            return mse(r_mom[:, 0]), mse(r_mom[:, 1]), mse(r_c), pressure_anchor_closed(p), mse(u_top, self.bench.lid_profile(batch["lid"][:, 0]))
 
-        ru, rv, rc, pa = jax.vmap(per_Re)(batch["Re"])
-        return {"r_u": ru.mean(), "r_v": rv.mean(), "r_c": rc.mean(), "p_anchor": pa.mean()}
+        ru, rv, rc, pa, ul = jax.vmap(per_Re)(batch["Re"])
+        out = {"r_u": ru.mean(), "r_v": rv.mean(), "r_c": rc.mean(), "p_anchor": pa.mean()}
+        if self.soft_lid:
+            out["u_lid"] = ul.mean()
+        return out
 
     def evaluate(self, params) -> Dict[str, float]:
         out = {}

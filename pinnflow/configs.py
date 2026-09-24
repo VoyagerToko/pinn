@@ -178,6 +178,7 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         p.eval_Re = (100, 400, 1000)
         p.holdout_Re_band = (300.0, 530.0)  # never sampled in training: Re = 400 is a zero-shot query
         p.zero_shot_Re = 400
+        p.lid_bc = "hard"  # as for the cavity: "soft" leaves u on the lid as a loss term
         c.arch = ml_collections.ConfigDict(
             {
                 "arch_name": "DeepONet",
