@@ -14,7 +14,7 @@ kept under their own names; nothing is deleted.
 | benchmark | gate | run | measured | status |
 |---|---|---|---|---|
 | A Taylor-Green 2D | rel L2 < 1e-4 | tgv2d_G (2026-09-22) | velocity 4.05e-5 (u 4.17e-5, v 3.93e-5), pressure 2.59e-4 after per-time gauge alignment, max div 0 | **passed** |
-| B lid-driven cavity | Ghia u(0.5,y) and v(x,0.5) error < 2% at Re=1000 | cavity_F_r2 (2026-09-24) | u 19.8%, v 20.2% (after L-BFGS) | **failed**, diagnosis D1; soft-lid rerun queued |
+| B lid-driven cavity | Ghia u(0.5,y) and v(x,0.5) error < 2% at Re=1000 | cavity_F_r2 (row F) and cavity_C_r2 (row C), 2026-09-24 | F: u 19.8%, v 20.2%; C: u 0.63%, v 2.05% (0.44% from a converged FD solution of the same problem, D2) | **failed** (F clearly, C by 0.05 points on v); diagnoses D1, D2; soft-lid F rerun queued |
 | C DFG 2D-2 cylinder | St within 3% of 0.30, Cd_max within 5% of 3.23 | - | - | pending |
 | D Taylor-Green 3D (SPINN) | dissipation peak within 5% of the reference (0.01282 at t=9.0, digitised) | - | - | pending |
 | inverse wake | lambda_1, lambda_2 recovered; hidden pressure | - | - | pending |
@@ -33,7 +33,10 @@ already in use on the card before the run (the Windows desktop holds ~2.1 GB).
 | 2026-09-22 | cavity_C | row C (soft BC, fixed weights), curriculum 20k/40k/140k + 20k L-BFGS, code before 24f0b1c (one lr schedule decaying across all stages) | Re=1000 checkpoint before L-BFGS: Ghia u 0.38%, v 2.33%, speed 4.3% | 5.4k s Adam (stages 616/1051/3704 s) | 0.026 s | - |
 | 2026-09-23 | cavity_F | row F (hard BC, grad-norm), same budget and code | Ghia u 23.9%, v 24.7%, speed 30.1% | - | 0.025 s | - |
 | 2026-09-24 | cavity_F_r2_killed | row F with the fixes of 24f0b1c | interrupted at step 63.7k: WSL shut the distro down when no terminal was attached (fixed with `instanceIdleTimeout=-1`, `vmIdleTimeout=-1` in `%USERPROFILE%\.wslconfig`); end of the Re=100 stage: Ghia u 3.7%, v 11.4% | - | 0.026 s | - |
-| 2026-09-24 | cavity_F_r2 | row F with the fixes of 24f0b1c, 200k Adam + 20k L-BFGS | Re=1000 final: Ghia u 19.8%, v 20.2%, speed 24.5% (before L-BFGS 19.5% / 19.8% / 24.3%); Re=400: 17.9% / 24.8%; Re=100: 3.8% / 12.2% | 8278 s (Adam 4.9k s, L-BFGS 3.3k s) | 0.024 s (L-BFGS 0.17 s/iter) | 1.58 GB / 2.6 GB |
+| 2026-09-24 | cavity_F_r2 | row F with the fixes of 24f0b1c, 200k Adam + 20k L-BFGS | Re=1000 final: Ghia u 19.8%, v 20.2%, speed 24.5% (before L-BFGS 19.5% / 19.8% / 24.3%); Re=400: 17.9% / 24.8%; Re=100: 3.8% / 12.2%; velocity vs FD regularised-lid solution 25.7% | 8278 s (Adam 4.9k s, L-BFGS 3.3k s) | 0.024 s (L-BFGS 0.17 s/iter) | 1.58 GB / 2.6 GB |
+| 2026-09-24 | cavity_C_r2 | row C (soft BC, fixed weights) under the current code, same budget; L-BFGS stopped by the stall rule after ~9k iterations at loss 2.7e-7 | Re=1000 final: Ghia u 0.63%, v 2.05% (gate missed on v by 0.05 points), speed vs JAX-PI 4.2%, **velocity vs FD regularised-lid solution 0.44%**; Re=400: 3.1% / 5.5%; Re=100: 1.5% / 4.7% | 5721 s | 0.025 s | 1.59 GB / 2.6 GB |
+| 2026-09-24 | tgv2d_G (re-evaluated) | cost numbers for the 2026-09-22 run | unchanged errors; inference 3.9e6 points/s (stream function, 65k batch) | - | 0.139 s | - |
+| 2026-09-24 | probes (300-2100 steps, `runs/_probe_*`) | step time / memory before the long runs | tgv3d SPINN 32^4: 0.044 s/step, 3.1 GB, ~5 min compile; **64^4: out of memory** (one 11.1 GB buffer; the card has ~13.9 GB free); cylinder row G: 0.089 s/step with remat, 0.55 GB, plus ~10% for the grad-norm/RAD/causal updates every 1000 steps | - | - | - |
 
 ## Diagnoses and decisions
 
@@ -54,6 +57,20 @@ Next: row C and row D (hard, fixed weights) under the same code tell whether the
 floor worse; `problem.lid_bc="soft"` (exact no-slip on the three fixed walls and exact v = 0 on the lid, lid
 velocity as a loss term) removes the incompatibility while keeping the hard constraint where it is compatible.
 It is queued as `cavity_F_softlid`.
+
+**D2 (2026-09-24) - how far can a cavity PINN get from Ghia with this lid? An independent reference.**
+`scripts/cavity_fd_reference.py` solves the steady cavity with finite differences (stream function -
+vorticity, 2nd order, DST Poisson solve, pseudo-time to |d omega/dt| < 1e-7). At Re = 1000, N = 256:
+unit lid psi_min = -0.11807 (Ghia -0.11793), Ghia error u 0.55%, v 2.12%; regularised lid (the problem the
+PINNs solve) u 0.66%, v 1.77%. The JAX-PI reference field is itself 2.50% / 1.76% from Ghia (same as our FD
+solution at N = 128, so it is a comparably coarse solution). Station by station, Ghia's v next to the right
+wall (x >= 0.94) is about 0.01 smaller in magnitude than the converged FD solution; that alone is the 1.8-2.1%.
+Row C tracks the FD solution to 1-2e-3 at every Ghia station (relative 0.42% in v, 0.47% in u, 0.44% over
+the whole field) with a slight uniform overshoot of |v|, which is why its Ghia v error (2.05%) ends up just
+above the regularised FD value (1.77%). So the 2% gate against Ghia's v table leaves a margin of only
+~0.2 points for a PINN solving this benchmark exactly; the field error against a converged solution of the
+same problem is reported next to the gate from now on (`rel_l2_vel_vs_fd` in eval.json). N = 512 solutions
+(grid convergence) are running.
 
 ## Code changes on 2026-09-24 (all committed)
 
