@@ -118,6 +118,40 @@ def eval_tgv3d(cfg, workdir: Path, n_hist: int = 32, spectrum_n: int = 64, n_tim
     k, E = M.energy_spectrum(u)
     np.savetxt(workdir / f"spectrum_t{t_peak:.1f}.csv", np.stack([k, E], 1), delimiter=",", header="k,E", comments="")
     out["spectrum_slope_k4_16"] = M.inertial_range_slope(k, E)
+    # reference dissipation curve digitised from DeBonis (2013) Fig. 4(a) (scripts/digitize_tgv_reference.py)
+    ref_path = ROOT / "data" / "tgv3d_re1600" / "debonis2013_fig4a_ref_dissipation.csv"
+    ref = None
+    if ref_path.exists():
+        ref = np.loadtxt(ref_path, delimiter=",", skiprows=1)
+        j = int(np.argmax(ref[:, 1]))
+        out["ref/dissipation_peak"] = float(ref[j, 1])
+        out["ref/dissipation_peak_time"] = float(ref[j, 0])
+        out["ref/source"] = "digitised from DeBonis 2013 NASA/TM-2013-217850 Fig. 4(a)"
+        out["dissipation_peak_rel_err"] = float(abs(out["dissipation_peak"] - ref[j, 1]) / ref[j, 1])
+        out["dissipation_peak_from_enstrophy_rel_err"] = float(abs(out["dissipation_peak_from_enstrophy"] - ref[j, 1]) / ref[j, 1])
+        eps_ref = np.interp(hist["t"], ref[:, 0], ref[:, 1])
+        out["dissipation_rel_l2_vs_ref"] = float(np.linalg.norm(eps_E - eps_ref) / np.linalg.norm(eps_ref))
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(1, 3, figsize=(16, 4.5))
+        ax[0].plot(hist["t"], hist["Ek"], label="PINN")
+        ax[0].set_xlabel("t"), ax[0].set_ylabel("E_k"), ax[0].set_title("kinetic energy")
+        ax[1].plot(hist["t"], eps_E, label="PINN  -dE_k/dt")
+        ax[1].plot(hist["t"], eps_Z, "--", label="PINN  2 nu zeta")
+        if ref is not None:
+            ax[1].plot(ref[:, 0], ref[:, 1], "k-", lw=1.0, label="reference (digitised, DeBonis 2013)")
+        ax[1].set_xlabel("t"), ax[1].set_ylabel("epsilon"), ax[1].set_title("dissipation rate"), ax[1].legend(fontsize=8)
+        kk = k[1:]
+        ax[2].loglog(kk, E[1:], label=f"PINN, t = {t_peak:.1f}")
+        ax[2].loglog(kk[3:17], E[4] * (kk[3:17] / kk[3]) ** (-5.0 / 3.0), "k:", label="k^-5/3")
+        ax[2].set_xlabel("k"), ax[2].set_ylabel("E(k)"), ax[2].set_title("energy spectrum"), ax[2].legend(fontsize=8)
+        fig.tight_layout(), fig.savefig(workdir / "energy_dissipation_spectrum.png", dpi=130)
+    except Exception as e:  # plotting is optional
+        print("plot skipped:", e)
     return out
 
 

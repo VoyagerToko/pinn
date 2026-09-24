@@ -241,14 +241,17 @@ class TaylorGreen3D:
     Initial condition:
         u =  sin x cos y cos z,  v = -cos x sin y cos z,  w = 0,
         p = (1/16)(cos 2x + cos 2y)(cos 2z + 2)
-    Reference: HiOCFD4/5 dissipation and enstrophy curves; the dissipation peak near t ~ 9
-    (approximately 1.28e-2 for the 512^3 spectral DNS) is the acceptance criterion (within 5%).
+    Reference: the dissipation peak near t ~ 9 is the acceptance criterion (within 5%). The HiOCFD
+    case pages publish no numeric curves; the reference curve used here is the "ref. soln." line of
+    DeBonis (2013), NASA/TM-2013-217850, Fig. 4(a), digitised by ``scripts/digitize_tgv_reference.py``
+    into ``data/tgv3d_re1600/debonis2013_fig4a_ref_dissipation.csv``: peak 0.01282 at t = 9.00
+    (digitisation uncertainty about +-1.6e-4 in epsilon, i.e. ~1 % of the peak).
     """
 
     Re: float = 1600.0
     T: float = 20.0
     dissipation_peak_time: float = 9.0
-    dissipation_peak_value: float = 0.0128  # approximate; compare against the downloaded HiOCFD data
+    dissipation_peak_value: float = 0.01282  # digitised, see above
     gate_rel_error: float = 0.05
 
     @property

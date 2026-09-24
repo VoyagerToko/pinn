@@ -20,3 +20,5 @@ data/dfg_benchmark/*/
 data/dfg_benchmark/*.html
 data/tgv3d_re1600/*
 !data/README.md
+
+!data/tgv3d_re1600/debonis2013_fig4a_ref_dissipation.csv
