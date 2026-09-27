@@ -124,11 +124,13 @@ A, row G (gate) & 50k + 20k & 50k + 1.2k\\
 B, rows C, D, F (gate) & 200k + 20k & 200k + 20k\\
 B, ablation rows & 200k + 20k & 16k + 0\\
 A, ablation rows & 50k + 20k & 3k + 0\\
-C, row G & $16\times200$k + 20k & $16\times4$k + 0\\
-C, ablation & rows A--G & not run\\
+C, row G & $16\times200$k + 20k & $4\times12$k + 0$^{*}$\\
+C, ablation & rows A--G & row E only, $4\times12$k$^{\dagger}$\\
 D, row H & 300k + 20k & 80k + 1k\\
 inverse & 100k + 20k & 25k + 1k\\
 PI-DeepONet & 200k + 20k & 25k + 1k\\
 \bottomrule
+\multicolumn{3}{@{}p{0.95\columnwidth}@{}}{\footnotesize $^{*}$ a first attempt with $16\times4$k steps was stopped
+after two windows (Section~\ref{sec:res-cylinder}). $^{\dagger}$ if completed within the time window.}
 \end{tabular}
 \end{table}

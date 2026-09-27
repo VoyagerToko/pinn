@@ -15,7 +15,16 @@ Without the per-slice alignment, i.e.\ with a single constant for the whole spac
 error of the same model would be reported as $3.3\times10^{-2}$, which illustrates how much of a
 ``pressure error'' can be gauge rather than physics. Training took about two hours at 0.139~s per step;
 the trained network answers $3.9\times10^6$ velocity queries per second (stream-function velocities include one
-derivative).
+derivative). Figure~\ref{fig:tgv2d} shows that the remaining error is spread uniformly over the domain at the
+$10^{-5}$ level, without structure tied to the vortices.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/tgv2d.pdf}
+\caption{Benchmark A at $t=1$: vorticity of the trained network (row G) and the pointwise magnitude of its
+velocity error against the exact solution.}
+\label{fig:tgv2d}
+\end{figure}
 
 \subsection{B: lid-driven cavity}
 \label{sec:res-cavity}

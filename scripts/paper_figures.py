@@ -96,6 +96,43 @@ def fig_cavity():
     print("cavity figures ->", FIG)
 
 
+def fig_tgv2d():
+    """Benchmark A at t = T: PINN vorticity and the pointwise velocity error (log scale)."""
+    from pinnflow.physics import velocity_gradient, vorticity_from_grad
+
+    run = "tgv2d_G"
+    cfg = ml_collections.ConfigDict(json.loads((RUNS / run / "config.json").read_text()))
+    pb = PROBLEMS["tgv2d"](cfg)
+    params, _ = load_params(RUNS / run / "latest.msgpack", template=pb.init_params(jax.random.PRNGKey(0)))
+    vel = pb.velocity_fn(params)
+    g = velocity_gradient(vel, dim=2, unsteady=True)
+    n, t = 128, float(pb.bench.T)
+    x = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    X, Y = np.meshgrid(x, x, indexing="ij")
+    pts = jnp.stack([jnp.full(X.size, t), jnp.asarray(X.ravel()), jnp.asarray(Y.ravel())], -1)
+
+    def one(z):
+        _, gu = g(z)
+        return vel(z), vorticity_from_grad(gu)
+
+    uvp, w = chunked_vmap(one, pts, chunk=4096)
+    ue, ve, _ = (np.asarray(a) for a in pb.bench.exact(t, X.ravel(), Y.ravel()))
+    err = np.hypot(np.asarray(uvp[:, 0]) - ue, np.asarray(uvp[:, 1]) - ve).reshape(n, n)
+    fig, ax = plt.subplots(1, 2, figsize=(7.0, 2.9))
+    im0 = ax[0].pcolormesh(X, Y, np.asarray(w).reshape(n, n), cmap="RdBu_r", shading="auto", rasterized=True)
+    ax[0].set_title(f"PINN vorticity, t = {t:g}")
+    fig.colorbar(im0, ax=ax[0], shrink=0.85)
+    im1 = ax[1].pcolormesh(X, Y, np.log10(err + 1e-12), cmap="magma", shading="auto", rasterized=True)
+    ax[1].set_title("$\\log_{10}|u_{PINN}-u_{exact}|$")
+    fig.colorbar(im1, ax=ax[1], shrink=0.85)
+    for a in ax:
+        a.set_aspect("equal"), a.set_xlabel("$x$"), a.set_ylabel("$y$")
+    fig.tight_layout()
+    fig.savefig(FIG / "tgv2d.pdf")
+    plt.close(fig)
+    print("tgv2d figure ->", FIG)
+
+
 def _eval(run: str):
     p = RUNS / run / "eval.json"
     return json.loads(p.read_text()) if p.exists() else None
@@ -129,6 +166,8 @@ def fig_ablation():
 if __name__ == "__main__":
     FIG.mkdir(parents=True, exist_ok=True)
     what = sys.argv[1] if len(sys.argv) > 1 else "all"
+    if what in ("tgv2d", "all"):
+        fig_tgv2d()
     if what in ("cavity", "all"):
         fig_cavity()
     if what in ("ablation", "all"):
