@@ -83,6 +83,13 @@ against the finest FD solution of the same problem (`rel_l2_vel_vs_fd` in eval.j
 Ghia numbers. FD solutions also exist for Re = 400 and 100 (N = 256, regularised): Ghia errors u 0.23% / v 4.9%
 and u 0.55% / v 3.5% (Ghia's low-Re v tables are coarser still), used for the curriculum stages.
 
+**Re-grading against the FD fields (2026-09-27, `scripts/eval_cavity_fd.py`, written to `runs/<run>/eval_fd.json`).**
+Velocity relative L2 against the regularised-lid FD solution (N=512 at Re=1000, N=256 at 100/400), final model:
+cavity_C (2026-09-22, old single lr schedule) 0.12% (end of Adam 0.10%); cavity_C_r2 0.27%; cavity_D_softlid 6.7%
+(end of Adam 1.9%); cavity_F_softlid 21.0%; cavity_F_r2 26.1%; cavity_D 28.3%. cavity_F (2026-09-23) cannot be
+re-graded: it was trained with the lid extension g = u_lid y, which the current code no longer builds (y^8), so
+only its logged numbers (Ghia 23.9% / 24.7%) are valid.
+
 **D3 (2026-09-27) - attribution for Benchmark B, and L-BFGS on a fixed batch overfits.** With the fully hard lid
 both row D (fixed weights) and row F (grad-norm) fail (~20% Ghia, 26-28% from the FD solution). With the soft lid,
 row D reaches Ghia u 1.04% / v 2.20% and 1.9% from the FD solution at the end of Adam, while row F stays at
