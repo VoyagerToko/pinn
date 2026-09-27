@@ -1,0 +1,21 @@
+\begin{table*}[t]
+\centering
+\caption{Benchmark C attempts (row G unless stated; all stopped early, see text). $C_D$: range over the last 40\%
+of the evaluated record, normalised with the nominal mean inflow $\bar U=1$. Flow-rate ratio: flow rate through the
+cross-section at $x=0.6$ and at the outlet $x=2.2$ divided by the inlet flow rate, at the end of the last evaluated
+window (1 for an incompressible flow). Continuity loss: mean-square $\nabla\cdot u$ at the end of that window.}
+\label{tab:cylinder}
+\small
+\begin{tabular}{@{}lllcccc@{}}
+\toprule
+attempt & start & windows evaluated & $C_D$ & flow-rate ratio $x=0.6$ / $2.2$ & continuity loss & causal $\varepsilon$ reached\\
+\midrule
+16 windows $\times$ 4k steps & impulsive & 2 (1.0 s) & 0.38--0.52 & 0.48 / 0.19 & $2.2\times10^{-2}$ & 0.1\\
+4 windows $\times$ 12k steps & impulsive & 1 (0.5 s) & 0.33--0.34 & 0.34 / 0.02 & $3.1\times10^{-2}$ & 0.1\\
+4 windows $\times$ 12k steps & 1 s ramp & 1 (0.5 s) & 0.08--0.10 & 0.12 / 0.02 & $1.2\times10^{-3}$ & 10\\
+stream function, 2 $\times$ 6k, row E & 1 s ramp & \pending{} & \pending{} & \pending{} & 0 (exact) & \pending{}\\
+\midrule
+reference (developed periodic flow) & -- & -- & 3.16--3.22 & 1 / 1 & 0 & --\\
+\bottomrule
+\end{tabular}
+\end{table*}

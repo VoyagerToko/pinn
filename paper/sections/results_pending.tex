@@ -1,5 +1,6 @@
 \subsection{C: flow past a cylinder}
 \label{sec:res-cylinder}
+\input{sections/table_cylinder}
 The first attempt followed the planned time marching with sixteen windows but only 4000 Adam steps per window.
 After two windows (1~s of flow) it was stopped: the drag coefficient was 0.32 at $t=0.25$~s, 0.36 at 0.5~s and
 0.45 at 0.75~s, an order of magnitude below the value of about 3.2 of the developed flow, and the front--rear
@@ -21,8 +22,20 @@ channel must accelerate at once; a representation that is smooth in time cannot 
 continuity instead, which is the temporal counterpart of the corner problem of the cavity. The runs below
 ramp the inflow over the first second (Section~\ref{sec:setup}).
 
-\pending{cylinder_G_ramp_4x12k results: Cd, Cl, dP per window, flow-rate ratios, causal convergence; row E
-comparison if run; gate status; figure.}
+With the ramp the optimisation behaves as intended: after 12k steps of the first window the continuity loss
+is $3\times10^{-4}$--$10^{-3}$ (20--80 times lower than with the impulsive start), the momentum loss
+$2\times10^{-5}$--$2\times10^{-4}$, and the causal tolerance has been raised to $\varepsilon=10$. Mass is still not
+conserved, however. At the end of the window only 12\% of the inlet flow rate crosses $x=0.6$ and 2\% leaves
+through the outlet, and the pressure drop along the channel is about $0.18$~Pa where accelerating the channel flow
+requires several pascals. The network balances momentum locally by keeping the downstream fluid nearly at rest
+and accepts a divergence of a few hundredths everywhere: small at each collocation point, but large once it
+is integrated over a channel 22 diameters long. With the velocity--pressure output, continuity is one loss term
+among eight, and on this long domain its per-point residual is simply not a strong enough constraint on the
+global flow rate. The drag coefficient accordingly stays near 0.1. Table~\ref{tab:cylinder} lists the attempts;
+all were stopped early, and none reached the periodic regime, so the Strouhal number is undefined and the gate
+is failed.
+
+\pending{stream-function test (cylinder_sf_2x6k): flow-rate ratio, Cd; Table tab:cylinder.}
 
 \subsection{D: three-dimensional Taylor--Green vortex}
 \label{sec:res-tgv3d}
