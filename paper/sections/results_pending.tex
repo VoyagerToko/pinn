@@ -39,8 +39,34 @@ is failed.
 
 \subsection{D: three-dimensional Taylor--Green vortex}
 \label{sec:res-tgv3d}
-\pending{tgv3d_H: E_k(0) vs 1/8, dissipation peak and time vs 0.01282 at 9.00, enstrophy-based peak,
-spectrum slope; figure energy/dissipation/spectrum + a movie frame.}
+The separable network (row H, vector-potential output, $32^4$ collocation grid, 80k Adam steps and 1k L-BFGS
+iterations, 74 minutes) fits the initial condition, with $E_k(0)=0.1246$ against the exact $1/8$, and then does
+not follow the physics (Figure~\ref{fig:tgv3d}). The kinetic energy decays smoothly to about 0.01 at $t=20$,
+and $-\dd E_k/\dd t$ is largest at $t=0$ (0.0292) instead of near $t=9$; the enstrophy-based dissipation
+$2\nu\zeta$ never exceeds $4.9\times10^{-4}$, essentially its initial value. Against the reference peak of 0.01282
+the errors are 127\% and 96\%, and the gate is failed. The two estimates of the dissipation, which must agree for
+a solution of the equations, differ by a factor of about 60: the energy leaves through the residual of the
+momentum equations (mean square $2.5$--$7\times10^{-4}$ in the second half of training, enough to remove energy at
+the rate of the physical dissipation) rather than through viscosity. The vertical velocity stays essentially zero
+($\mathcal{L}_{r_w}\sim10^{-9}$), so the model never develops the vortex stretching that drives the transition, and
+the spectrum at $t=9$ falls off as $k^{-3.5}$ between $k=4$ and 16 rather than following the $k^{-5/3}$ of an
+inertial range. The loss weights show the pathology already seen on the cavity and the cylinder in its most
+extreme form: the initial-condition term for $w$, whose target is identically zero and whose gradient is
+therefore tiny, received a weight of $6\times10^{9}$, and the $w$-momentum term $2.6\times10^{3}$. The causal
+tolerance reached $\varepsilon=10$ after 15k steps and never the final value. With a quarter of the planned
+steps and a sixteenth of the planned collocation points (the $64^4$ grid needs a single 11~GB buffer and did
+not fit), this run gives a lower bound only; it does, however, show that the failure is not a slow approach to
+the right answer but convergence to a smooth decaying state that violates the energy balance.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.75\textwidth]{figures/tgv3d_energy.pdf}
+\caption{Benchmark D ($\Rey=1600$, row H, reduced budget): kinetic energy, the two dissipation estimates of the
+PINN against the reference curve digitised from~\cite{debonis2013}, and the energy spectrum at $t=9$.}
+\label{fig:tgv3d}
+\end{figure*}
+
+\pending{movie frame figure from runs/tgv3d_H/render if useful}
 
 \subsection{Inverse problem}
 \label{sec:res-inverse}

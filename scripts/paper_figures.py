@@ -133,6 +133,34 @@ def fig_tgv2d():
     print("tgv2d figure ->", FIG)
 
 
+def fig_tgv3d():
+    """Benchmark D: kinetic energy, both dissipation estimates against the digitised reference, spectrum."""
+    run = RUNS / "tgv3d_H"
+    h = np.loadtxt(run / "energy_history.csv", delimiter=",", skiprows=1)
+    ref = np.loadtxt(ROOT / "data" / "tgv3d_re1600" / "debonis2013_fig4a_ref_dissipation.csv", delimiter=",", skiprows=1)
+    spec = [run / "spectrum_t9.0.csv"] if (run / "spectrum_t9.0.csv").exists() else sorted(run.glob("spectrum_t*.csv"))
+    fig, ax = plt.subplots(1, 3, figsize=(7.0, 2.3))
+    ax[0].plot(h[:, 0], h[:, 1], "C0")
+    ax[0].set_xlabel("$t$"), ax[0].set_ylabel("$E_k$"), ax[0].set_title("kinetic energy")
+    ax[1].plot(ref[:, 0], ref[:, 1], "k-", lw=1.2, label="reference (digitised)")
+    ax[1].plot(h[:, 0], h[:, 3], "C0-", lw=1.0, label="PINN $-dE_k/dt$")
+    ax[1].plot(h[:, 0], h[:, 4], "C1--", lw=1.0, label="PINN $2\\nu\\zeta$")
+    ax[1].set_xlabel("$t$"), ax[1].set_ylabel("$\\varepsilon$"), ax[1].set_title("dissipation rate"), ax[1].legend(fontsize=6)
+    if spec:
+        s = np.loadtxt(spec[0], delimiter=",", skiprows=1)
+        k, E = s[1:, 0], s[1:, 1]
+        ax[2].loglog(k, E, "C0", label="PINN, " + spec[0].stem.replace("spectrum_t", "t = "))
+        kk = k[(k >= 4) & (k <= 16)]
+        ax[2].loglog(kk, E[k == 4][0] * (kk / 4) ** (-5 / 3), "k:", label="$k^{-5/3}$")
+        ax[2].set_xlabel("$k$"), ax[2].set_ylabel("$E(k)$"), ax[2].set_title("energy spectrum"), ax[2].legend(fontsize=6)
+    for a in ax:
+        a.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(FIG / "tgv3d_energy.pdf")
+    plt.close(fig)
+    print("tgv3d figure ->", FIG)
+
+
 def _eval(run: str):
     p = RUNS / run / "eval.json"
     return json.loads(p.read_text()) if p.exists() else None
@@ -168,6 +196,8 @@ if __name__ == "__main__":
     what = sys.argv[1] if len(sys.argv) > 1 else "all"
     if what in ("tgv2d", "all"):
         fig_tgv2d()
+    if what in ("tgv3d", "all"):
+        fig_tgv3d()
     if what in ("cavity", "all"):
         fig_cavity()
     if what in ("ablation", "all"):
