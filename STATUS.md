@@ -131,6 +131,21 @@ cavity lid traded continuity at the corners (D1). More steps cannot fix that. Fi
 compatible initial state; the periodic 2D-2 state is unaffected. It is now the cylinder default; runs before it had
 an impulsive start (`inflow_ramp` absent = 0). Rerun: `cylinder_G_ramp_4x12k` (4 windows x 12k steps).
 
+**D6 (2026-09-27) - with the ramp the residuals drop 20-80x, but the velocity-pressure network still does not
+conserve mass.** `runs/cylinder_G_ramp_4x12k` window 0 (12k steps, stopped afterwards): continuity loss 3e-4..1e-3
+(impulsive: 2-3e-2), momentum 2e-5..2e-4, causal eps reached 10 (min weight 0.67-0.98), so training behaves. But
+at t = 0.5 s the inlet carries 0.205 m^2/s while only 0.025 cross x = 0.6 and 0.005 leave through the outlet
+(flow-rate ratios at the window end: 0.12 / 0.04 / 0.02 at x = 0.6 / 1.2 / 2.2); the pressure drop along the channel
+is 0.18 Pa where accelerating the channel flow needs ~3.5 Pa. The network satisfies momentum locally by keeping the
+downstream fluid almost still and pays with a small continuity residual everywhere (|div u| ~ 0.03, small per point,
+large once integrated over the 22-diameter channel). C_D 0.08-0.10 (normalised with the nominal U = 1).
+Partial evaluations of all stopped cylinder runs are in `runs/<run>/eval_partial.json` (St values there are
+artefacts of 0.5-1 s records without shedding). Consequence: the cylinder rows as implemented (VP output, exact
+Dirichlet data but divergence only as a loss) cannot represent mass conservation over the channel at this budget.
+A stream-function formulation (`problem.formulation="streamfunction"`, soft Dirichlet data, exact div u = 0 so
+the flow rate is fixed by psi on the walls) is queued last as `cylinder_sf_2x6k` (2 windows x 6k, 8,192 residual
+points, fixed weights, causal on). The cylinder gate is failed either way within this time budget.
+
 **Plan change (2026-09-27, requested): finish everything within 12 hours.** The specified budgets (cylinder 16 x 200k
 steps, SPINN 300k, full ablation on A-C) need ~150-160 GPU hours. On request the remaining runs use reduced
 budgets, stated per run: cylinder row G 4 windows x 12k Adam steps with the inflow ramp (warm-up 1k, no L-BFGS; see D4, D5); SPINN row H 80k + 1k
