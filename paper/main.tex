@@ -1,0 +1,47 @@
+\documentclass[10pt,twocolumn]{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{siunitx}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks]{hyperref}
+\usepackage{caption}
+\captionsetup{font=small,labelfont=bf}
+\sisetup{group-separator={,}}
+
+\newcommand{\pending}[1]{\textcolor{red}{[#1]}}
+\newcommand{\Rey}{\mathrm{Re}}
+\newcommand{\bu}{\mathbf{u}}
+\newcommand{\bx}{\mathbf{x}}
+\newcommand{\dd}{\,\mathrm{d}}
+
+\title{Physics-informed neural networks on a ladder of incompressible-flow benchmarks:\\
+what the components contribute, where they fail, and what they cost}
+\author{[Author name(s) and affiliation to be added]}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\input{sections/abstract}
+\end{abstract}
+
+\input{sections/introduction}
+\input{sections/method}
+\input{sections/setup}
+\input{sections/results}
+\input{sections/discussion}
+
+\section*{Acknowledgements}
+The code base and the drafting of this manuscript were assisted by an AI tool (a large language model used as a
+programming and writing assistant). All numerical results were produced by the code in the accompanying
+repository and were checked against its logs; responsibility for the content lies with the human author(s).
+
+\bibliographystyle{unsrtnat}
+\bibliography{references}
+
+\end{document}

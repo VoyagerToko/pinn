@@ -1,0 +1,134 @@
+\section{Benchmarks, reference data and protocol}
+\label{sec:setup}
+
+Every forward problem is trained on the equations alone; reference data are used only to grade the result.
+Only the inverse problem puts measured data into the loss. All runs use the same random seed. Relative $L^2$
+errors $\|\hat q-q\|_2/\|q\|_2$ are evaluated on grids or point sets that are not the collocation points.
+
+\subsection{A: two-dimensional Taylor--Green vortex}
+On the periodic square $[0,2\pi]^2$ with $\Rey=100$ and $t\in[0,1]$ the decaying vortex
+$u=-\cos x\sin y\,e^{-2t/\Rey}$, $v=\sin x\cos y\,e^{-2t/\Rey}$,
+$p=-\tfrac14(\cos2x+\cos2y)\,e^{-4t/\Rey}$~\cite{taylor1937} is an exact solution. It checks the residual
+implementation: the test suite verifies that the exact fields give residuals below $10^{-10}$ in double
+precision before any network is trained. The network (stream-function form in the full configuration) sees
+the initial condition and the equations; errors are measured on $5\times64\times64$ space--time points. Since
+the pressure of an unsteady incompressible flow is determined only up to a function of time, the predicted
+pressure is shifted to the mean of the exact pressure in each time slice before its error is computed. Gate:
+relative velocity error below $10^{-4}$.
+
+\subsection{B: lid-driven cavity}
+The unit square has no-slip walls and a lid moving in $+x$ with the regularised profile
+$u_{\mathrm{lid}}$ of Section~\ref{sec:method} ($r=50$), which removes the velocity discontinuity of the
+classical problem at the upper corners. Training follows the $\Rey=100\to400\to1000$ curriculum. The gate is
+the relative error of the centreline profiles $u(0.5,y)$ and $v(x,0.5)$ at $\Rey=1000$ against the tables of
+Ghia et al.~\cite{ghia1982}, below 2\% for both, evaluated at the tabulated stations without the wall and lid
+points. We transcribed the tables by hand and validated the transcription against the reference fields
+distributed with JAX-PI~\cite{jaxpi}: under the same metric the two agree to within 5\% at $\Rey=100$, 400 and
+1000 (at $\Rey=1000$: 2.5\% for $u$, 1.8\% for $v$).
+
+Because Ghia et al.\ and the JAX-PI fields use a unit lid, neither is a solution of the problem the PINN
+actually solves. We therefore wrote an independent finite-difference solver for the regularised problem:
+stream function and vorticity on a uniform grid, second-order central differences, the wall vorticity from
+Thom's formula~\cite{thom1933}, the Poisson equation solved exactly for the five-point Laplacian with a
+type-I sine transform, and second-order explicit pseudo-time stepping until
+$\max|\partial_t\omega|<10^{-7}$. At $\Rey=1000$ the unit-lid solutions on $128^2$, $256^2$ and $512^2$ grids give
+minimum stream-function values $-0.11547$, $-0.11807$ and $-0.11872$, which extrapolate (second order) to
+$-0.11894$, the spectral value of Botella and Peyret~\cite{botella1998} ($-0.1189366$); Ghia et al.\ report
+$-0.11793$. The regularised-lid solution on the $512^2$ grid is our field reference for $\Rey=1000$
+(the $256^2$ and $512^2$ fields differ by 0.56\%), and $256^2$ solutions serve at $\Rey=100$ and 400.
+
+\subsection{C: DFG 2D-2 flow past a cylinder}
+The channel, cylinder, viscosity $\nu=10^{-3}$ and parabolic inflow with maximum 1.5 (mean $\bar U=1$) follow
+Sch\"afer and Turek~\cite{schaefer1996}; with the diameter $D=0.1$ as length scale $\Rey=100$ and the flow
+sheds vortices periodically. At the outlet the do-nothing condition $\Rey^{-1}\partial_xu-p=0$,
+$\partial_xv=0$ is imposed as a loss. Drag and lift coefficients are computed from the surface integral of
+the viscous and pressure tractions on 256 quadrature points, with the velocity gradient on the wall from the
+network by automatic differentiation; the Strouhal number $St=fD/\bar U$ uses the dominant frequency of a
+Hann-windowed Fourier transform of $C_L(t)$ over the second half of the record. Gates: $St$ within 3\% of 0.30
+and $C_{D,\max}$ within 5\% of 3.23. The paper by Sch\"afer and Turek was not retrievable at the address in
+our reference list; its reference intervals ($C_{D,\max}\in[3.22,3.24]$, $C_{L,\max}\in[0.99,1.01]$,
+$St\in[0.295,0.305]$) were taken from the FEATFLOW benchmark pages~\cite{featflow}, together with the
+FEATFLOW drag and lift time series used for comparison. The value $St\approx0.16$--0.17 often quoted for
+$\Rey=100$ holds for an unconfined cylinder; in this confined channel the reference value is 0.30. The
+FEATFLOW series (finest level, file \texttt{bdforces\_q2\_lv6\_dt3}) is periodic from its first sample, and
+itself gives $St=0.3002$, $C_{D,\max}=3.2201$ and $C_{L,\max}=0.986$; because the PINN starts from rest, curves
+are compared after aligning the phase of the last lift maximum.
+
+\subsection{D: three-dimensional Taylor--Green vortex}
+The triply periodic box $[0,2\pi]^3$ at $\Rey=1600$ starts from $u=\sin x\cos y\cos z$,
+$v=-\cos x\sin y\cos z$, $w=0$~\cite{brachet1983}; the flow transitions to small-scale turbulence around $t\approx8$--9
+and decays until $t=20$. We compute the kinetic energy $E_k(t)$ and enstrophy $\zeta(t)$ as grid averages
+on $32^3$ points, the dissipation rate $\varepsilon=-\dd E_k/\dd t$ and its incompressible counterpart
+$2\nu\zeta$, and the shell-summed energy spectrum on $64^3$ points. The gate is the dissipation peak within
+5\% of the reference. The case descriptions of the high-order CFD workshops~\cite{wang2013hiocfd} contain no
+numerical curves, so we digitised the reference-solution curve of Figure~4(a) in DeBonis~\cite{debonis2013}
+from a 600~dpi rendering of the report, following the black line pixel by pixel. The digitised curve peaks at
+$\varepsilon=0.01282$ at $t=9.00$; as a check, its value at $t=0$ is $4.4\times10^{-4}$ against the analytic
+$3/(4\Rey)=4.69\times10^{-4}$.
+
+\subsection{Inverse problem and parametric surrogate}
+The cylinder-wake data set of~\cite{raissi2019pinn} (spectral-element simulation at $\Rey=100$, 5000 points
+by 200 snapshots in a window behind an unconfined cylinder) provides $(u,v)$ at 5000 randomly chosen
+space--time samples. The network (stream-function form) is trained on these velocities plus the residual
+\eqref{eq:rm} with unknown $\lambda_1$ and $\lambda_2$, both initialised at zero; the targets are $\lambda_1=1$
+and $\lambda_2=\nu=0.01$. The pressure is never shown to the network; its error is measured on every tenth
+snapshot after aligning the mean per snapshot.
+
+The PI-DeepONet is trained over $\Rey\in[100,1000]$ drawn log-uniformly, four values per step, except that the
+band $[300,530]$ is never sampled; $\Rey=400$ is therefore a query the model has not seen. Gate: velocity
+error at $\Rey=400$ below 10\% against the reference field.
+
+\subsection{Ablation protocol and budgets}
+Table~\ref{tab:rows} lists the configurations. Rows A--G are run on Benchmarks A and B with the same seed
+and collocation budget within a benchmark; row H (the separable network) exists only for D. For the steady
+cavity, causal weighting is inactive, so rows D and E coincide. The planned budgets were
+200k Adam steps per cylinder time window, 300k for D and full budgets for every ablation row, about
+150--160 GPU hours in total; the work had to be completed within one day of GPU time, so the budgets
+actually used are reduced as stated in Table~\ref{tab:budget}. All runs used one RTX~5070~Ti (16~GB) under
+WSL2; for most of the runs reported here the card was shared with an unrelated video-analytics workload
+using about 70\% of it, which slowed our steps by a factor of about 1.3--1.5.
+
+\begin{table}[t]
+\centering
+\caption{Ablation rows. F: Fourier features; M: modified MLP with weight factorisation; H: hard
+constraints (exact divergence and Dirichlet data); C: causal weights; W: gradient-norm weighting;
+R: residual-based resampling; S: separable network.}
+\label{tab:rows}
+\small
+\begin{tabular}{lccccccc}
+\toprule
+row & F & M & H & C & W & R & S\\
+\midrule
+A & -- & -- & -- & -- & -- & -- & --\\
+B & \checkmark & -- & -- & -- & -- & -- & --\\
+C & \checkmark & \checkmark & -- & -- & -- & -- & --\\
+D & \checkmark & \checkmark & \checkmark & -- & -- & -- & --\\
+E & \checkmark & \checkmark & \checkmark & \checkmark & -- & -- & --\\
+F & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & -- & --\\
+G & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & --\\
+H & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark & \checkmark\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Training budgets actually used (Adam steps + L-BFGS iterations).}
+\label{tab:budget}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+run & planned & used\\
+\midrule
+A, row G (gate) & 50k + 20k & 50k + 1.2k\\
+B, rows C, D, F (gate) & 200k + 20k & 200k + 20k\\
+B, ablation rows & 200k + 20k & 20k + 1k\\
+A, ablation rows & 50k + 20k & 4k + 0.5k\\
+C, row G & $16\times200$k & $16\times4$k\\
+C, ablation & rows A--G & not run\\
+D, row H & 300k + 20k & 80k + 1k\\
+inverse & 100k + 20k & 30k + 1k\\
+PI-DeepONet & 200k + 20k & 30k + 1k\\
+\bottomrule
+\end{tabular}
+\end{table}

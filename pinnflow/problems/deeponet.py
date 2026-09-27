@@ -94,7 +94,17 @@ class ParametricCavityDeepONet(Problem):
 
     def evaluate(self, params) -> Dict[str, float]:
         out = {}
+        from ..data import DATA_DIR
+
         for Re in self.eval_Re:
+            # field error against the finite-difference solution of the same regularised-lid problem
+            fd = sorted((DATA_DIR / "cavity_fd").glob(f"cavity_fd_Re{Re}_regularised_N*.npz"), key=lambda p: int(p.stem.split("_N")[-1]))
+            if fd:
+                d = np.load(fd[-1])
+                X, Y = np.meshgrid(d["x"], d["y"], indexing="ij")
+                pts_fd = jnp.asarray(np.stack([X.ravel(), Y.ravel()], -1), jnp.float32)
+                uv_fd = jnp.asarray(np.stack([d["u"].ravel(), d["v"].ravel()], -1), jnp.float32)
+                out[f"rel_l2_vel_vs_fd_Re{Re}"] = float(relative_l2(chunked_vmap(self.net(params, float(Re)), pts_fd)[:, :2], uv_fd))
             try:
                 ref = load_jaxpi_cavity(Re)
             except Exception:

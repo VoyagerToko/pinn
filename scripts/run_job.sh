@@ -17,6 +17,7 @@ shift 3
 cd "$(dirname "$0")/.."
 source ~/miniforge3/bin/activate pinn
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
+export XLA_FLAGS="${XLA_FLAGS:---xla_gpu_autotune_level=2}"  # shorter compiles (kernel autotuning), same maths
 wd=runs/$name
 log=runs/$name.log
 mkdir -p "$wd"
