@@ -152,8 +152,9 @@ budgets, stated per run: cylinder row G 4 windows x 12k Adam steps with the infl
 L-BFGS at 32^4 (64^4 does not fit, see probes); inverse 25k + 1k; PI-DeepONet 25k + 1k; ablation rows A-G on
 Benchmark B at 16k curriculum steps and on Benchmark A at 3k steps, Adam only (warm-up 1k, same seed and
 collocation budget within each benchmark; L-BFGS dropped after D3); the cylinder ablation is not run. The GPU is shared with two
-KalaVision services (run.py + ffmpeg decoders, ~70% utilisation, ~7.5 GB) that could not be stopped from this
-session; step times measured while sharing are ~1.3-1.5x the exclusive ones, and the nvidia-smi "above idle" memory
+KalaVision services (run.py + ffmpeg decoders, ~70% utilisation, ~7.5 GB) until 2026-09-27 19:24 UTC, when they
+were stopped on request (scheduled tasks \Kala\KalaVision-Attendance and -Bag disabled; re-enable with
+Enable-ScheduledTask -TaskPath "\Kala\\" ...); runs up to and including the start of tgv3d_H were shared; step times measured while sharing are ~1.3-1.5x the exclusive ones, and the nvidia-smi "above idle" memory
 is not meaningful then (the JAX peak is).
 
 ## Code changes on 2026-09-24 (all committed)
