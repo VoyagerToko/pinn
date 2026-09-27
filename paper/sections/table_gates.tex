@@ -1,0 +1,19 @@
+\begin{table*}[t]
+\centering
+\caption{Acceptance gates (fixed before training) and the measured values. ``Reduced'' marks runs whose
+budget was cut (Table~\ref{tab:budget}).}
+\label{tab:gates}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+benchmark & gate & measured & status\\
+\midrule
+A: Taylor--Green 2D & velocity rel.\ $L^2<10^{-4}$ & $4.05\times10^{-5}$ & passed\\
+B: cavity, $\Rey=1000$ & Ghia $u$ and $v$ errors $<2\%$ & row C: 0.63\% / 2.05\%; row F: 19.8\% / 20.2\% & failed (see text: exact solution gives 2.29\% on $v$)\\
+C: DFG 2D-2 cylinder (reduced) & $St$ within 3\% of 0.30, $C_{D,\max}$ within 5\% of 3.23 & \pending{St, Cd} & \pending{}\\
+D: Taylor--Green 3D (reduced) & dissipation peak within 5\% of 0.01282 & \pending{peak} & \pending{}\\
+inverse wake (reduced) & recover $\lambda_1=1$, $\lambda_2=0.01$ & \pending{} & \pending{}\\
+PI-DeepONet (reduced) & zero-shot error at $\Rey=400$ $<10\%$ & \pending{} & \pending{}\\
+\bottomrule
+\end{tabular}
+\end{table*}

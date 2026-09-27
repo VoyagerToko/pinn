@@ -90,6 +90,10 @@ cavity_C (2026-09-22, old single lr schedule) 0.12% (end of Adam 0.10%); cavity_
 re-graded: it was trained with the lid extension g = u_lid y, which the current code no longer builds (y^8), so
 only its logged numbers (Ghia 23.9% / 24.7%) are valid.
 
+**FD solver cost (CPU, 28 threads, machine shared with other workloads; `runs/cavity_fd*.log`).** Re=1000 to
+|d omega/dt| < 1e-7: N=256 about 600 s (regularised) / 695 s (unit), N=512 3415 s / 3323 s; Re=400 N=256 236 s;
+Re=100 N=256 418 s. It is an explicit pseudo-time code written for clarity, not speed.
+
 **D3 (2026-09-27) - attribution for Benchmark B, and L-BFGS on a fixed batch overfits.** With the fully hard lid
 both row D (fixed weights) and row F (grad-norm) fail (~20% Ghia, 26-28% from the FD solution). With the soft lid,
 row D reaches Ghia u 1.04% / v 2.20% and 1.9% from the FD solution at the end of Adam, while row F stays at
@@ -105,9 +109,9 @@ neutral, on cavity_F_r2 slightly harmful. Both pre- and post-L-BFGS numbers are 
 **Plan change (2026-09-27, requested): finish everything within 12 hours.** The specified budgets (cylinder 16 x 200k
 steps, SPINN 300k, full ablation on A-C) need ~150-160 GPU hours. On request the remaining runs use reduced
 budgets, stated per run: cylinder row G 16 windows x 4k Adam steps (warm-up 1k, no L-BFGS); SPINN row H 80k + 1k
-L-BFGS at 32^4 (64^4 does not fit, see probes); inverse 30k + 1k; PI-DeepONet 30k + 1k; ablation rows A-G on
-Benchmark B at 20k curriculum steps + 1k L-BFGS and on Benchmark A at 4k + 500 L-BFGS (warm-up 1k, same seed and
-collocation budget within each benchmark); the cylinder ablation is not run. The GPU is shared with two
+L-BFGS at 32^4 (64^4 does not fit, see probes); inverse 25k + 1k; PI-DeepONet 25k + 1k; ablation rows A-G on
+Benchmark B at 16k curriculum steps and on Benchmark A at 3k steps, Adam only (warm-up 1k, same seed and
+collocation budget within each benchmark; L-BFGS dropped after D3); the cylinder ablation is not run. The GPU is shared with two
 KalaVision services (run.py + ffmpeg decoders, ~70% utilisation, ~7.5 GB) that could not be stopped from this
 session; step times measured while sharing are ~1.3-1.5x the exclusive ones, and the nvidia-smi "above idle" memory
 is not meaningful then (the JAX peak is).
