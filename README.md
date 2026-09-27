@@ -159,13 +159,14 @@ Benchmark A row G with the default config (stream function = third-order derivat
 Expect roughly 4x faster steps on a 16 GB desktop card (about 0.25 s/step, 3-4 h for the 50k-step run).
 Row A-C configs (VP formulation, second order) are about 3x cheaper per step than rows D-G.
 
-* On 16 GB cards `--set training.remat=False` removes the ~30% recomputation overhead for 2D runs.
+* On 16 GB cards `--set training.remat=False` removes the ~30% recomputation overhead for small 2D runs; for the
+  cylinder (16,384 residual points) it runs out of memory in the grad-norm update (measured 2026-09-24).
 * Lower `training.res_chunk` (e.g. 1024) if a 6 GB card still runs out of memory; raise it on big cards.
 * The grad-norm / NTK weight updates run one backward pass per loss term every `update_every_steps`; NTK
   diagonals are chunked in blocks of 256 points.
 * Slow first compile: `export XLA_FLAGS=--xla_gpu_autotune_level=2` cuts autotuning time at a small runtime cost.
-* SPINN grid: 32^4 (~1M effective points) is the default; the handbook's 64^4 needs
-  `--set training.n_per_axis="(64,64,64,64)"` and a 16 GB card.
+* SPINN grid: 32^4 (~1M effective points) is the default (0.044 s/step, 3.1 GB on the RTX 5070 Ti); the
+  handbook's 64^4 (`--set training.n_per_axis="(64,64,64,64)"`) does **not** fit in 16 GB (one 11.1 GB buffer).
 * Always `export XLA_PYTHON_CLIENT_PREALLOCATE=false` in WSL so the display driver keeps its share.
 
 ## 7. Deviations from the handbook and things to know
@@ -188,4 +189,21 @@ issues) and `docs/PINN_Implementation_Handbook.md` (the handbook this code imple
   `weighting.grad_norm_reference="r_u"` for the handbook's literal `||grad L_res|| / ||grad L_i||`.
 * **Ghia tables** were transcribed, not downloaded; the test against the JAX-PI reference fields is the check.
 * **Benchmark D** runs as row H only (handbook: "and H on D"); rows A-G raise a clear error for `tgv3d`.
+* **Benchmark D reference**: the HiOCFD pages publish no numeric curves; the reference dissipation curve is
+  digitised from DeBonis (2013) Fig. 4(a) (`scripts/digitize_tgv_reference.py`, peak 0.01282 at t = 9.00).
+* **Cavity lid** (STATUS.md D1-D3): imposing the regularised lid exactly (`u = g + phi N` on the lid) is
+  incompatible with continuity at the two top corners, and rows D/F fail with it; `problem.lid_bc="soft"` keeps
+  no-slip and v = 0 exact and makes only the lid velocity a loss term. Rows D-G of the cavity ablation use it.
+  The fully hard runs are kept as evidence.
+* **Cavity reference**: besides Ghia et al. and the JAX-PI fields (both unit lid), a finite-difference solution of
+  the regularised-lid problem (`scripts/cavity_fd_reference.py`, 512^2 at Re=1000) is the field reference
+  (`rel_l2_vel_vs_fd`). A converged solution of this benchmark is 2.29% from Ghia's v table.
+* **L-BFGS** runs on one fixed collocation batch; on the cavity it can lower the loss by orders of magnitude
+  while the field error grows (STATUS.md D3). Report pre- and post-L-BFGS numbers.
+* **Causal eps** starts at the first entry of the annealing schedule (1e-2); before 2026-09-24 it started at
+  `causal_tol` = 1.0.
+* **PI-DeepONet** never samples Re in [300, 530]; Re = 400 is the zero-shot query.
+* **Reduced budgets (2026-09-27)**: to finish within a 12-hour window the cylinder, 3D, inverse, DeepONet and
+  ablation runs use the reduced budgets listed in STATUS.md; the cylinder ablation was not run.
+* **STEP 9 export**: `.vti` frames written before 2026-09-24 had x and z swapped (VTK stores x fastest).
 * **Disk**: C: has ~30 GB free; the WSL VHD grows on C:, so keep an eye on it during large runs.
