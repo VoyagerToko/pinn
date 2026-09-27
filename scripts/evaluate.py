@@ -48,6 +48,7 @@ def eval_cylinder(cfg, workdir: Path, dt_eval: float = 0.005):
     dt = float(cfg.problem.window_dt)
     windows = sorted(workdir.glob("window_*"))
     series = {"t": [], "Cd": [], "Cl": [], "dP": []}
+    mass = {}
     for w in windows:
         idx = int(w.name.split("_")[1])
         problem = DFGCylinderPINN(cfg, t0=idx * dt, t1=(idx + 1) * dt)
@@ -56,9 +57,19 @@ def eval_cylinder(cfg, workdir: Path, dt_eval: float = 0.005):
         s = M.drag_lift_series(problem.velocity_dim_fn(params), times, problem.bench)
         for k in series:
             series[k].append(s[k])
+        # mass conservation: flow rate through cross-sections relative to the inlet flow rate at the window end
+        b = problem.bench
+        y = np.linspace(0.0, b.height, 401)
+        t_end = (idx + 1) * dt - 1e-6
+        q_in = float(np.trapezoid(np.asarray(b.inflow(t_end, y)), y))
+        vel = jax.vmap(problem.velocity_dim_fn(params))
+        for x in (0.6, 1.2, 2.2):
+            z = jnp.stack([jnp.full(y.shape, t_end), jnp.full(y.shape, x), jnp.asarray(y)], -1)
+            q = float(np.trapezoid(np.asarray(vel(z))[:, 0], y))
+            mass[f"{w.name}/flow_rate_ratio_x{x:g}"] = q / q_in if q_in > 0 else float("nan")
     series = {k: np.concatenate(v) for k, v in series.items()}
     np.savetxt(workdir / "drag_lift.csv", np.stack([series[k] for k in ("t", "Cd", "Cl", "dP")], 1), delimiter=",", header="t,Cd,Cl,dP", comments="")
-    out = {}
+    out = dict(mass)
     bench = DFGCylinderPINN(cfg).bench
     if len(series["t"]) > 20:
         St, f = M.strouhal(series["t"], series["Cl"], D=bench.diameter, U=bench.U_ref)
