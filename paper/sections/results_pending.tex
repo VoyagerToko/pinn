@@ -1,7 +1,18 @@
 \subsection{C: flow past a cylinder}
 \label{sec:res-cylinder}
-\pending{cylinder_G: 16 windows x 4k steps. St, Cd_max, Cl_max, Cl amplitude in the last second, causal
-min weight and eps per window; figure drag_lift + vorticity snapshot.}
+The first attempt followed the planned time marching with sixteen windows but only 4000 Adam steps per window.
+After two windows (1~s of flow) it was stopped: the drag coefficient was 0.32 at $t=0.25$~s, 0.36 at 0.5~s and
+0.45 at 0.75~s, an order of magnitude below the value of about 3.2 of the developed flow, and the front--rear
+pressure difference was 0.19--0.29 instead of about 2.5. The continuity and momentum losses were still at
+$2\times10^{-2}$ and $6\times10^{-3}$, the causal weights had not converged (minimum weight 0.92--0.94 with the
+tolerance still at $\varepsilon=0.1$), and gradient-norm balancing had raised the weight of the outflow
+condition on $v$ to 7000--9000 because its gradient is tiny. The drag integral itself is checked against
+analytic fields in the test suite, so the low drag reflects a boundary layer and near wake that the network had
+not yet resolved. Continuing would have propagated this state through fourteen more windows and could not
+produce the shedding needed for a Strouhal number, so the same GPU time was spent on four windows of 12k steps.
+
+\pending{cylinder_G_4x12k results: Cd, Cl, dP per window, causal convergence; row E comparison if run;
+gate status; figure.}
 
 \subsection{D: three-dimensional Taylor--Green vortex}
 \label{sec:res-tgv3d}

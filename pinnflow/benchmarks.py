@@ -147,6 +147,10 @@ class DFGCylinder:
     center: Tuple[float, float] = (0.2, 0.2)
     radius: float = 0.05
     T: float = 8.0
+    # 2D-2 only: ramp the inflow amplitude from 0 with sin^2(pi t / (2 ramp_time)) for t < ramp_time. An impulsive
+    # start (ramp_time = 0) is incompatible with a fluid at rest (the whole channel must carry the inlet flow rate
+    # at t = 0+), which a network that is smooth in time cannot represent; the periodic state is unaffected.
+    ramp_time: float = 0.0
     # nondimensionalisation
     U_ref: float = 1.0  # mean inflow velocity
     L_ref: float = 0.1  # cylinder diameter
@@ -180,6 +184,9 @@ class DFGCylinder:
         amp = self.U_max
         if self.variant == "2D-3":
             amp = amp * jnp.sin(jnp.pi * t / 8.0)
+        elif self.ramp_time > 0:
+            s = jnp.clip(jnp.asarray(t) / self.ramp_time, 0.0, 1.0)
+            amp = amp * jnp.sin(0.5 * jnp.pi * s) ** 2
         return 4.0 * amp * y * (self.height - y) / self.height**2
 
     def in_fluid(self, x: Array, y: Array) -> Array:

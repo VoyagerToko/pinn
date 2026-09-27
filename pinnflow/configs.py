@@ -126,6 +126,7 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         p.phi = "bounded"  # or "handbook" for the literal 4.6b polynomial
         p.outflow = "do_nothing"
         p.window_dt = 0.5  # seconds (dimensional); T* = 5 per window
+        p.inflow_ramp = 1.0  # 2D-2: sin^2 ramp of the inflow over the first second (0 = impulsive start, STATUS D5)
         p.num_time_windows = 16  # 16 x 0.5 s = 8 s
         c.arch.out_dim = 3
         c.arch.activation = "gelu"

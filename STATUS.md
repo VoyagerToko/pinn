@@ -119,9 +119,21 @@ grad-norm outflow weights hurt, as they did on the cavity. Each window costs ~7 
 step, the first grad-norm update and the first RAD resampling each compile; the RAD residual is re-jitted at every
 resampling because it closes over the current parameters), which is why fewer windows are also cheaper.
 
+**D5 (2026-09-27) - the impulsive start of 2D-2 is incompatible data in time; fix: ramp the inflow.** With 12k steps per
+window (`runs/cylinder_G_4x12k_impulsive`, stopped in window 1) the drag stayed at C_D = 0.31 (t = 0.25 s) and 0.32
+(0.5 s), continuity at 2-3e-2, and the grad-norm weight of the outflow-v term grew to 2.4e5. The flow rate through
+cross-sections of the trained window 0 shows why: the hard inflow constraint gives 0.41 m^2/s at x = 0 from t = 0,
+but at t = 0.5 s the network carries 0.24 at x = 0.1, 0.14 at x = 0.6, 0.03 at x = 1.2 and 0.008 at the outlet. It
+advances the inflow like a slow front instead of the instantaneous channel-wide start that incompressibility
+demands when full inflow meets a fluid at rest, i.e. it trades continuity for temporal smoothness, just as the exact
+cavity lid traded continuity at the corners (D1). More steps cannot fix that. Fix (problem setup, not method):
+`problem.inflow_ramp = 1.0` ramps the 2D-2 inflow amplitude with sin^2(pi t / 2) over the first second, so rest is a
+compatible initial state; the periodic 2D-2 state is unaffected. It is now the cylinder default; runs before it had
+an impulsive start (`inflow_ramp` absent = 0). Rerun: `cylinder_G_ramp_4x12k` (4 windows x 12k steps).
+
 **Plan change (2026-09-27, requested): finish everything within 12 hours.** The specified budgets (cylinder 16 x 200k
 steps, SPINN 300k, full ablation on A-C) need ~150-160 GPU hours. On request the remaining runs use reduced
-budgets, stated per run: cylinder row G 4 windows x 12k Adam steps (warm-up 1k, no L-BFGS; see D4, first tried as 16 x 4k); SPINN row H 80k + 1k
+budgets, stated per run: cylinder row G 4 windows x 12k Adam steps with the inflow ramp (warm-up 1k, no L-BFGS; see D4, D5); SPINN row H 80k + 1k
 L-BFGS at 32^4 (64^4 does not fit, see probes); inverse 25k + 1k; PI-DeepONet 25k + 1k; ablation rows A-G on
 Benchmark B at 16k curriculum steps and on Benchmark A at 3k steps, Adam only (warm-up 1k, same seed and
 collocation budget within each benchmark; L-BFGS dropped after D3); the cylinder ablation is not run. The GPU is shared with two

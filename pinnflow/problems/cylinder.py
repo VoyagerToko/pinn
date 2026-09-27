@@ -39,7 +39,7 @@ class DFGCylinderPINN(Problem):
 
     def __init__(self, config, t0: float = 0.0, t1: Optional[float] = None, ic_fn: Optional[Callable] = None):
         super().__init__(config)
-        self.bench = DFGCylinder(variant=config.problem.get("variant", "2D-2"))
+        self.bench = DFGCylinder(variant=config.problem.get("variant", "2D-2"), ramp_time=float(config.problem.get("inflow_ramp", 0.0)))
         self.t0 = float(t0)
         self.t1 = float(t1 if t1 is not None else config.problem.get("window_dt", 0.5))
         self.ic_fn = ic_fn  # dimensional (x, y) -> (u, v, p)
