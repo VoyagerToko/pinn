@@ -102,6 +102,26 @@ def test_cylinder_time_marching(tmp_path):
     assert len(trs) == 2 and trs[1].problem.ic_fn is not None
 
 
+def test_cylinder_streamfunction_is_divergence_free(tmp_path):
+    """formulation='streamfunction': soft Dirichlet data, (psi, p) outputs, div u = 0 to round-off."""
+    ov = dict(TINY, **{"arch.fourier_emb.embed_dim": 16, "problem.window_dt": 0.05, "problem.formulation": "streamfunction", "arch.out_dim": 2})
+    cfg = get_config("cylinder", "E", ov)
+
+    def make(idx, ic_fn):
+        p = DFGCylinderPINN(cfg, t0=idx * 0.05, t1=(idx + 1) * 0.05, ic_fn=ic_fn)
+        return Trainer(p, cfg, tmp_path / f"sf{idx}", jax.random.PRNGKey(idx))
+
+    trs = train_time_windows(make, 2, 3, log_every=1, eval_every=None, ckpt_every=None)
+    pb, params = trs[1].problem, trs[1].state.params
+    assert not pb.hard_bc
+    batch = pb.sample_batch(jax.random.PRNGKey(5))
+    terms = pb.losses(params, batch)
+    assert "u_cylinder" in terms and "r_c" not in terms
+    _, div = jax.vmap(pb.residual_fn(params))(batch["res"])
+    assert float(np.abs(np.asarray(div)).max()) < 1e-4 * (1 + float(np.abs(np.asarray(jax.vmap(pb.velocity_fn(params))(batch["res"]))).max()))
+    assert np.isfinite(pb.evaluate(params)["Cd@0.10"])
+
+
 def test_tgv3d_spinn_vp_and_vector_potential(tmp_path):
     for form in ("vp", "vector_potential"):
         ov = dict(TINY, **{"arch.rank": 4, "training.n_per_axis": (4, 5, 5, 5), "training.ic_grid": 4, "problem.formulation": form, "weighting.use_causal": True})

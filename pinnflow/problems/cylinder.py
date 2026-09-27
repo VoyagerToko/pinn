@@ -43,7 +43,12 @@ class DFGCylinderPINN(Problem):
         self.t0 = float(t0)
         self.t1 = float(t1 if t1 is not None else config.problem.get("window_dt", 0.5))
         self.ic_fn = ic_fn  # dimensional (x, y) -> (u, v, p)
-        self.hard_bc = bool(config.problem.get("hard_bc", True))
+        # "vp": (u, v, p) outputs, continuity is a loss term; "streamfunction": (psi, p) outputs with u = psi_y,
+        # v = -psi_x, so div u = 0 exactly and the flow rate between the walls is psi(H) - psi(0) everywhere
+        # (STATUS D6). The stream-function value on the cylinder is not known in advance, so its Dirichlet data
+        # are soft losses on the derived velocity.
+        self.formulation = config.problem.get("formulation", "vp")
+        self.hard_bc = bool(config.problem.get("hard_bc", True)) and self.formulation == "vp"
         self.outflow = config.problem.get("outflow", "do_nothing")
         self.Re = self.bench.Re
         L, U = self.bench.L_ref, self.bench.U_ref
@@ -92,11 +97,14 @@ class DFGCylinderPINN(Problem):
         return hard_dirichlet(raw, g, phi, constrained=(0, 1))
 
     def velocity_fn(self, params):
+        """Non-dimensional (t*, x*, y*) -> (u, v, p) for either formulation."""
+        if self.formulation == "streamfunction":
+            return physics.streamfunction_velocity(self.net(params), unsteady=True)
         return self.net(params)
 
     def velocity_dim_fn(self, params):
         """Dimensional (t, x, y) -> dimensional (u, v, p); what :func:`pinnflow.metrics.drag_lift` needs."""
-        f = self.net(params)
+        f = self.velocity_fn(params)
         b = self.bench
 
         def vel(z_dim):
@@ -106,10 +114,21 @@ class DFGCylinderPINN(Problem):
         return vel
 
     def residual_fn(self, params):
+        if self.formulation == "streamfunction":
+            return physics.ns_streamfunction_residual(self.net(params), self.Re, unsteady=True)
         return physics.ns_vp_residual(self.net(params), self.Re, dim=2, unsteady=True)
 
+    def _residual_terms(self, r_mom, r_c):
+        """Squared residual terms entering the (causal) loss; continuity only for the VP form."""
+        terms = [r_mom[:, 0] ** 2, r_mom[:, 1] ** 2]
+        names = ["r_u", "r_v"]
+        if self.formulation == "vp":
+            terms.append(r_c**2)
+            names.append("r_c")
+        return names, terms
+
     def outflow_residual_fn(self, params):
-        f = self.net(params)
+        f = self.velocity_fn(params)
 
         def r(z):
             out, J = physics.derivatives(f, z, 1)
@@ -149,7 +168,7 @@ class DFGCylinderPINN(Problem):
         return batch
 
     def losses(self, params, batch) -> Dict[str, jnp.ndarray]:
-        f = jax.vmap(self.net(params))
+        f = jax.vmap(self.velocity_fn(params))
         out = {}
         # initial condition
         pred_ic = f(batch["ic"])
@@ -175,23 +194,24 @@ class DFGCylinderPINN(Problem):
             out["p_out"] = mse(r_out[:, 2])
         # residuals
         r_mom, r_c = self.vmap_pointwise(self.residual_fn(params))(batch["res"])
-        terms = [r_mom[:, 0] ** 2, r_mom[:, 1] ** 2, r_c**2]
+        names, terms = self._residual_terms(r_mom, r_c)
         if self.use_causal:
             vals, _ = causal_residual_losses(batch["res"][:, 0], terms, self.num_chunks, batch["causal_eps"])
         else:
             vals = [jnp.mean(t) for t in terms]
-        out.update(dict(zip(["r_u", "r_v", "r_c"], vals)))
+        out.update(dict(zip(names, vals)))
         return out
 
     def causal_min_weight(self, params, batch):
-        r_mom, r_c = jax.vmap(self.residual_fn(params))(batch["res"])
-        _, gamma = causal_residual_losses(batch["res"][:, 0], [r_mom[:, 0] ** 2, r_mom[:, 1] ** 2, r_c**2], self.num_chunks, batch["causal_eps"])
+        r_mom, r_c = self.vmap_pointwise(self.residual_fn(params))(batch["res"])
+        _, terms = self._residual_terms(r_mom, r_c)
+        _, gamma = causal_residual_losses(batch["res"][:, 0], terms, self.num_chunks, batch["causal_eps"])
         return gamma.min()
 
     def ntk_diags(self, params, batch):
         from ..losses import ntk_diag
 
-        net_i = lambda i: (lambda p, z: self.net(p)(z)[i])
+        net_i = lambda i: (lambda p, z: self.velocity_fn(p)(z)[i])
         res_i = lambda i: (lambda p, z: self.residual_fn(p)(z)[0][i])
         d = {
             "u_ic": ntk_diag(net_i(0), params, batch["ic"]),
@@ -200,8 +220,9 @@ class DFGCylinderPINN(Problem):
             "v_out": ntk_diag(lambda p, z: self.outflow_residual_fn(p)(z)[1], params, batch["bc_outlet"]),
             "r_u": ntk_diag(res_i(0), params, batch["res"]),
             "r_v": ntk_diag(res_i(1), params, batch["res"]),
-            "r_c": ntk_diag(lambda p, z: self.residual_fn(p)(z)[1], params, batch["res"]),
         }
+        if self.formulation == "vp":
+            d["r_c"] = ntk_diag(lambda p, z: self.residual_fn(p)(z)[1], params, batch["res"])
         if not self.hard_bc:
             for name in ("inlet", "walls", "cylinder"):
                 tag = {"inlet": "in"}.get(name, name)
