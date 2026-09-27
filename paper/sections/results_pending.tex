@@ -11,8 +11,18 @@ analytic fields in the test suite, so the low drag reflects a boundary layer and
 not yet resolved. Continuing would have propagated this state through fourteen more windows and could not
 produce the shedding needed for a Strouhal number, so the same GPU time was spent on four windows of 12k steps.
 
-\pending{cylinder_G_4x12k results: Cd, Cl, dP per window, causal convergence; row E comparison if run;
-gate status; figure.}
+Three times as many steps did not change the picture: after 12k steps in the first window $C_D$ was still 0.31 at
+$t=0.25$~s and 0.32 at 0.5~s, the continuity loss stayed at $2$--$3\times10^{-2}$, and the outflow weight had grown
+to $2.4\times10^5$. The flow rate through cross-sections of that model identifies the cause. The exact inflow
+constraint delivers $0.41~\mathrm{m^2/s}$ at $x=0$ from $t=0$ on, but at $t=0.5$~s the network carries
+$0.24$ at $x=0.1$, $0.14$ at $x=0.6$, $0.03$ at $x=1.2$ and $0.008$ at the outlet: the inflow advances into the
+channel as a slow front. For an incompressible fluid at rest that is suddenly given the full inflow, the whole
+channel must accelerate at once; a representation that is smooth in time cannot follow this jump and gives up
+continuity instead, which is the temporal counterpart of the corner problem of the cavity. The runs below
+ramp the inflow over the first second (Section~\ref{sec:setup}).
+
+\pending{cylinder_G_ramp_4x12k results: Cd, Cl, dP per window, flow-rate ratios, causal convergence; row E
+comparison if run; gate status; figure.}
 
 \subsection{D: three-dimensional Taylor--Green vortex}
 \label{sec:res-tgv3d}

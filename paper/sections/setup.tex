@@ -41,7 +41,12 @@ $-0.11793$. The regularised-lid solution on the $512^2$ grid is our field refere
 The channel, cylinder, viscosity $\nu=10^{-3}$ and parabolic inflow with maximum 1.5 (mean $\bar U=1$) follow
 Sch\"afer and Turek~\cite{schaefer1996}; with the diameter $D=0.1$ as length scale $\Rey=100$ and the flow
 sheds vortices periodically. At the outlet the do-nothing condition $\Rey^{-1}\partial_xu-p=0$,
-$\partial_xv=0$ is imposed as a loss. Drag and lift coefficients are computed from the surface integral of
+$\partial_xv=0$ is imposed as a loss. The reference values describe the periodic state, which does not depend on
+how the flow was started. Starting a fluid at rest with the full inflow is incompatible data in time (an
+incompressible channel must carry the full flow rate from the first instant), and Section~\ref{sec:res-cylinder}
+shows that a network which is smooth in time violates mass conservation instead; the runs reported as final
+therefore ramp the inflow amplitude as $\sin^2(\pi t/2)$ over the first second, so that rest is a compatible
+initial state. Drag and lift coefficients are computed from the surface integral of
 the viscous and pressure tractions on 256 quadrature points, with the velocity gradient on the wall from the
 network by automatic differentiation; the Strouhal number $St=fD/\bar U$ uses the dominant frequency of a
 Hann-windowed Fourier transform of $C_L(t)$ over the second half of the record. Gates: $St$ within 3\% of 0.30
