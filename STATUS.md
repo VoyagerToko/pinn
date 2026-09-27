@@ -16,7 +16,7 @@ kept under their own names; nothing is deleted.
 | A Taylor-Green 2D | rel L2 < 1e-4 | tgv2d_G (2026-09-22) | velocity 4.05e-5 (u 4.17e-5, v 3.93e-5), pressure 2.59e-4 after per-time gauge alignment, max div 0 | **passed** |
 | B lid-driven cavity | Ghia u(0.5,y) and v(x,0.5) error < 2% at Re=1000 | cavity_F_r2 (row F) and cavity_C_r2 (row C), 2026-09-24 | F: u 19.8%, v 20.2%; C: u 0.63%, v 2.05% (0.27% from the N=512 FD solution of the same problem, which itself is 0.41% / 2.29% from Ghia, D2) | **failed** (F clearly, C by 0.05 points on v); diagnoses D1, D2; soft-lid F rerun queued |
 | C DFG 2D-2 cylinder | St within 3% of 0.30, Cd_max within 5% of 3.23 | - | - | pending |
-| D Taylor-Green 3D (SPINN) | dissipation peak within 5% of the reference (0.01282 at t=9.0, digitised) | - | - | pending |
+| D Taylor-Green 3D (SPINN) | dissipation peak within 5% of the reference (0.01282 at t=9.0, digitised) | tgv3d_H (80k steps, reduced) | peak of -dE/dt 0.0292 at t=0 (127%); 2 nu zeta max 4.9e-4 (96%); no transition | **failed** (D7) |
 | inverse wake | lambda_1, lambda_2 recovered; hidden pressure | - | - | pending |
 | PI-DeepONet cavity | zero-shot error < 10% at Re=400 (Re in [300, 530] never sampled in training) | - | - | pending |
 
@@ -38,6 +38,7 @@ already in use on the card before the run (the Windows desktop holds ~2.1 GB).
 | 2026-09-24 | cavity_D | row D (hard BC, fixed weights; row E is identical for a steady problem, causal weighting is off) | Re=1000 final: Ghia u 21.3%, v 19.8%, velocity vs FD (N=512) 28.3%; Re=400: 7.0% / 8.7% (FD 10.0%); Re=100: 3.6% / 8.8% (FD 7.9%) | 10023 s | 0.024 s | 1.59 GB / 2.6 GB |
 | 2026-09-24 | cavity_F_softlid | row F with `problem.lid_bc="soft"`, 200k Adam; L-BFGS interrupted (all jobs stopped on request), evaluated from the end-of-Adam checkpoint on 2026-09-27 | Re=1000: Ghia u 16.0%, v 15.6%, velocity vs FD 21.0%; Re=400: 10.0% / 11.7%; Re=100: 1.6% / 7.1%. Grad-norm drove w/u_lid to ~465 and w/r_c to 0.21: the soft lid became effectively hard again and continuity stayed at 2e-2..1e-1 | ~2.3 h Adam | 0.023 s | 1.59 GB |
 | 2026-09-27 | cavity_D_softlid | row D (fixed weights) with the soft lid, 200k Adam + 20k L-BFGS; GPU shared with the KalaVision services | **end of Adam (Re1000.msgpack): Ghia u 1.04%, v 2.20%, velocity vs FD 1.9%**; after L-BFGS: u 4.96%, v 6.37%, FD 6.7% (L-BFGS loss 2.6e-3 -> 2.3e-6 on its fixed batch, D3); Re=400: 1.6% / 4.6% (FD 3.1%); Re=100: 0.7% / 2.1% (FD 4.8%) | 11761 s | 0.035 s (shared GPU) | 1.59 GB |
+| 2026-09-27 | tgv3d_H | row H (SPINN, vector potential, 32^4 grid), 80k Adam + 1k L-BFGS (reduced from 300k + 20k); GPU shared until 19:24 UTC | **gate failed**: E_k(0) = 0.1246 (exact 0.125); -dE_k/dt peaks at t = 0 with 0.0292 (reference 0.01282 at t = 9.0, error 127%); 2 nu zeta never exceeds 4.9e-4 (error 96%); curve rel. L2 vs reference 1.52; spectrum slope k=4..16 -3.96 | 4458 s | 0.037 s | 3.07 GB |
 | 2026-09-24 | tgv2d_G (re-evaluated) | cost numbers for the 2026-09-22 run | unchanged errors; inference 3.9e6 points/s (stream function, 65k batch) | - | 0.139 s | - |
 | 2026-09-24 | probes (300-2100 steps, `runs/_probe_*`) | step time / memory before the long runs | tgv3d SPINN 32^4: 0.044 s/step, 3.1 GB, ~5 min compile; **64^4: out of memory** (one 11.1 GB buffer; the card has ~13.9 GB free); cylinder row G: 0.089 s/step with remat, 0.55 GB, plus ~10% for the grad-norm/RAD/causal updates every 1000 steps | - | - | - |
 
@@ -145,6 +146,19 @@ Dirichlet data but divergence only as a loss) cannot represent mass conservation
 A stream-function formulation (`problem.formulation="streamfunction"`, soft Dirichlet data, exact div u = 0 so
 the flow rate is fixed by psi on the walls) is queued last as `cylinder_sf_2x6k` (2 windows x 6k, 8,192 residual
 points, fixed weights, causal on). The cylinder gate is failed either way within this time budget.
+
+**D7 (2026-09-27) - Benchmark D: no transition, energy leaks through the residual; grad-norm weights explode.**
+tgv3d_H (80k Adam, 32^4) fits the initial condition (E_k(0) = 0.1246) and then decays smoothly: E_k falls to ~0.01 by
+t = 20, -dE_k/dt is largest at t = 0 (0.029) and 2 nu zeta stays at its initial value (~4.7e-4) throughout, so the two
+dissipation estimates differ by a factor ~60 and the energy identity is violated: energy leaves through the momentum
+residual (mean square 2.5-7e-4 in the last 40k steps, i.e. <u.r> ~ 5e-3, the size of the physical dissipation), not
+through viscosity. w stays ~0 (r_w ~ 1e-9, ic_w ~ 1e-15): the network keeps the flow two-dimensional, so no vortex
+stretching and no enstrophy growth. Grad-norm raised the weight of ic_w (target identically 0) to 6e9 and of r_w to
+2.6e3; every term, satisfied or not, gets the same share of the gradient. Causal eps reached 10 at step 15k and
+never 100 (min weight 0.8-0.92). This is the same weighting pathology as the cavity lid (w ~ 465, D3) and the
+cylinder outflow (w ~ 2.4e5, D5): terms whose gradient is tiny receive enormous weights. A fix would at least put
+terms with an identically-zero target (ic_w) into `weighting.fixed_terms`, but reaching the Re = 1600 transition is
+not plausible at this budget; not rerun within the 12-hour window. The STEP 9 movie is rendered from this model.
 
 **Plan change (2026-09-27, requested): finish everything within 12 hours.** The specified budgets (cylinder 16 x 200k
 steps, SPINN 300k, full ablation on A-C) need ~150-160 GPU hours. On request the remaining runs use reduced
