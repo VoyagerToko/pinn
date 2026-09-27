@@ -106,9 +106,22 @@ fixed draw of 8,192 collocation points; on cavity_D_softlid 20k iterations lower
 magnitude but tripled the field error (overfitting the fixed points); on cavity_C_r2 it stopped early and was
 neutral, on cavity_F_r2 slightly harmful. Both pre- and post-L-BFGS numbers are reported from here on.
 
+**D4 (2026-09-27) - cylinder at 4k steps per window: flow unresolved, budget moved to fewer, longer windows.**
+`runs/cylinder_G_16x4k_stopped` (row G, 16 windows x 4k Adam steps, warm-up 1k, GPU shared) was stopped after two
+windows: C_D = 0.32 at t = 0.25 s, 0.36 at 0.5 s and 0.45 at 0.75 s against ~3.2 for the developed flow, front-rear
+pressure difference 0.19-0.29 against ~2.5; continuity loss ~2e-2, momentum ~6e-3; causal min weight 0.92-0.94 with
+eps only at 0.1; grad-norm put the outflow-v weight at 7e3-9e3 (its gradient is tiny). The drag integral is covered by
+analytic tests (tests/test_metrics.py), so the low drag is an unresolved boundary layer / wake, not a metric bug. With
+14 more windows the unresolved state would only have been propagated, and shedding (needed for St) was not going to
+appear, so the same GPU time was moved to 4 windows x 12k steps for row G (`cylinder_G_4x12k`) and, if time allows at
+the end of the queue, row E with fixed weights (`cylinder_E_4x12k`) to test on the cylinder itself whether the
+grad-norm outflow weights hurt, as they did on the cavity. Each window costs ~7 min of XLA compilation (the first
+step, the first grad-norm update and the first RAD resampling each compile; the RAD residual is re-jitted at every
+resampling because it closes over the current parameters), which is why fewer windows are also cheaper.
+
 **Plan change (2026-09-27, requested): finish everything within 12 hours.** The specified budgets (cylinder 16 x 200k
 steps, SPINN 300k, full ablation on A-C) need ~150-160 GPU hours. On request the remaining runs use reduced
-budgets, stated per run: cylinder row G 16 windows x 4k Adam steps (warm-up 1k, no L-BFGS); SPINN row H 80k + 1k
+budgets, stated per run: cylinder row G 4 windows x 12k Adam steps (warm-up 1k, no L-BFGS; see D4, first tried as 16 x 4k); SPINN row H 80k + 1k
 L-BFGS at 32^4 (64^4 does not fit, see probes); inverse 25k + 1k; PI-DeepONet 25k + 1k; ablation rows A-G on
 Benchmark B at 16k curriculum steps and on Benchmark A at 3k steps, Adam only (warm-up 1k, same seed and
 collocation budget within each benchmark; L-BFGS dropped after D3); the cylinder ablation is not run. The GPU is shared with two
