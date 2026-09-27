@@ -36,6 +36,8 @@ already in use on the card before the run (the Windows desktop holds ~2.1 GB).
 | 2026-09-24 | cavity_F_r2 | row F with the fixes of 24f0b1c, 200k Adam + 20k L-BFGS | Re=1000 final: Ghia u 19.8%, v 20.2%, speed 24.5% (before L-BFGS 19.5% / 19.8% / 24.3%); Re=400: 17.9% / 24.8%; Re=100: 3.8% / 12.2%; velocity vs FD regularised-lid solution 26.1% (N=512) | 8278 s (Adam 4.9k s, L-BFGS 3.3k s) | 0.024 s (L-BFGS 0.17 s/iter) | 1.58 GB / 2.6 GB |
 | 2026-09-24 | cavity_C_r2 | row C (soft BC, fixed weights) under the current code, same budget; L-BFGS stopped by the stall rule after ~9k iterations at loss 2.7e-7 | Re=1000 final: Ghia u 0.63%, v 2.05% (gate missed on v by 0.05 points), speed vs JAX-PI 4.2%, **velocity vs FD regularised-lid solution 0.27% (N=512; 0.44% vs N=256)**; Re=400: 3.1% / 5.5%; Re=100: 1.5% / 4.7% | 5721 s | 0.025 s | 1.59 GB / 2.6 GB |
 | 2026-09-24 | cavity_D | row D (hard BC, fixed weights; row E is identical for a steady problem, causal weighting is off) | Re=1000 final: Ghia u 21.3%, v 19.8%, velocity vs FD (N=512) 28.3%; Re=400: 7.0% / 8.7% (FD 10.0%); Re=100: 3.6% / 8.8% (FD 7.9%) | 10023 s | 0.024 s | 1.59 GB / 2.6 GB |
+| 2026-09-24 | cavity_F_softlid | row F with `problem.lid_bc="soft"`, 200k Adam; L-BFGS interrupted (all jobs stopped on request), evaluated from the end-of-Adam checkpoint on 2026-09-27 | Re=1000: Ghia u 16.0%, v 15.6%, velocity vs FD 21.0%; Re=400: 10.0% / 11.7%; Re=100: 1.6% / 7.1%. Grad-norm drove w/u_lid to ~465 and w/r_c to 0.21: the soft lid became effectively hard again and continuity stayed at 2e-2..1e-1 | ~2.3 h Adam | 0.023 s | 1.59 GB |
+| 2026-09-27 | cavity_D_softlid | row D (fixed weights) with the soft lid, 200k Adam + 20k L-BFGS; GPU shared with the KalaVision services | **end of Adam (Re1000.msgpack): Ghia u 1.04%, v 2.20%, velocity vs FD 1.9%**; after L-BFGS: u 4.96%, v 6.37%, FD 6.7% (L-BFGS loss 2.6e-3 -> 2.3e-6 on its fixed batch, D3); Re=400: 1.6% / 4.6% (FD 3.1%); Re=100: 0.7% / 2.1% (FD 4.8%) | 11761 s | 0.035 s (shared GPU) | 1.59 GB |
 | 2026-09-24 | tgv2d_G (re-evaluated) | cost numbers for the 2026-09-22 run | unchanged errors; inference 3.9e6 points/s (stream function, 65k batch) | - | 0.139 s | - |
 | 2026-09-24 | probes (300-2100 steps, `runs/_probe_*`) | step time / memory before the long runs | tgv3d SPINN 32^4: 0.044 s/step, 3.1 GB, ~5 min compile; **64^4: out of memory** (one 11.1 GB buffer; the card has ~13.9 GB free); cylinder row G: 0.089 s/step with remat, 0.55 GB, plus ~10% for the grad-norm/RAD/causal updates every 1000 steps | - | - | - |
 
@@ -80,6 +82,28 @@ discretisation error of the 256^2 finite-difference solve; row F is 26.1% from i
 against the finest FD solution of the same problem (`rel_l2_vel_vs_fd` in eval.json) is reported next to the
 Ghia numbers. FD solutions also exist for Re = 400 and 100 (N = 256, regularised): Ghia errors u 0.23% / v 4.9%
 and u 0.55% / v 3.5% (Ghia's low-Re v tables are coarser still), used for the curriculum stages.
+
+**D3 (2026-09-27) - attribution for Benchmark B, and L-BFGS on a fixed batch overfits.** With the fully hard lid
+both row D (fixed weights) and row F (grad-norm) fail (~20% Ghia, 26-28% from the FD solution). With the soft lid,
+row D reaches Ghia u 1.04% / v 2.20% and 1.9% from the FD solution at the end of Adam, while row F stays at
+16% / 16% (21% from FD) because grad-norm raises the lid weight until the constraint is hard again and lowers the
+continuity weight. So on the cavity the hard lid constraint (rows D-G as specified) and the adaptive weighting
+(rows F, G) each break training; soft boundary data with fixed weights (rows C and D-softlid) work. Decision: rows
+D-G of the cavity ablation run with `lid_bc="soft"` from now on (the fully hard runs above are kept as evidence),
+and PI-DeepONet uses the soft lid with fixed weights. Second finding: the Stage-2 L-BFGS runs full-batch on one
+fixed draw of 8,192 collocation points; on cavity_D_softlid 20k iterations lowered that loss by three orders of
+magnitude but tripled the field error (overfitting the fixed points); on cavity_C_r2 it stopped early and was
+neutral, on cavity_F_r2 slightly harmful. Both pre- and post-L-BFGS numbers are reported from here on.
+
+**Plan change (2026-09-27, requested): finish everything within 12 hours.** The specified budgets (cylinder 16 x 200k
+steps, SPINN 300k, full ablation on A-C) need ~150-160 GPU hours. On request the remaining runs use reduced
+budgets, stated per run: cylinder row G 16 windows x 4k Adam steps (warm-up 1k, no L-BFGS); SPINN row H 80k + 1k
+L-BFGS at 32^4 (64^4 does not fit, see probes); inverse 30k + 1k; PI-DeepONet 30k + 1k; ablation rows A-G on
+Benchmark B at 20k curriculum steps + 1k L-BFGS and on Benchmark A at 4k + 500 L-BFGS (warm-up 1k, same seed and
+collocation budget within each benchmark); the cylinder ablation is not run. The GPU is shared with two
+KalaVision services (run.py + ffmpeg decoders, ~70% utilisation, ~7.5 GB) that could not be stopped from this
+session; step times measured while sharing are ~1.3-1.5x the exclusive ones, and the nvidia-smi "above idle" memory
+is not meaningful then (the JAX peak is).
 
 ## Code changes on 2026-09-24 (all committed)
 
