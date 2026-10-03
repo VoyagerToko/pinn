@@ -55,6 +55,7 @@ def main():
     ap.add_argument("--windows", type=int, default=None, help="number of time windows (cylinder)")
     ap.add_argument("--workdir", default=None)
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--init", default=None, help="warm-start the network from this checkpoint (same architecture)")
     ap.add_argument("--wandb", action="store_true")
     ap.add_argument("--set", nargs="*", default=[], help="config overrides key=value")
     args = ap.parse_args()
@@ -78,6 +79,9 @@ def main():
     if args.benchmark == "cavity":
         problem = CavityPINN(cfg)
         trainer = Trainer(problem, cfg, workdir, key, use_wandb=args.wandb)
+        if args.init:
+            trainer.load(args.init)
+            print(f"[train] warm start from {args.init}")
         Re_list = list(cfg.problem.curriculum_Re)
         steps = list(cfg.problem.curriculum_steps)
         if args.steps is not None:  # rescale the curriculum to the requested total
@@ -105,6 +109,9 @@ def main():
         # handbook 6.3 for the parametric model: widen the sampled Reynolds range stage by stage
         problem = PROBLEMS[args.benchmark](cfg)
         trainer = Trainer(problem, cfg, workdir, key, use_wandb=args.wandb)
+        if args.init:
+            trainer.load(args.init)
+            print(f"[train] warm start from {args.init}")
         Re_max_list = [float(r) for r in cfg.problem.curriculum_Re_max]
         steps = list(cfg.problem.curriculum_steps)
         if args.steps is not None:
@@ -123,6 +130,9 @@ def main():
     else:
         problem = PROBLEMS[args.benchmark](cfg)
         trainer = Trainer(problem, cfg, workdir, key, use_wandb=args.wandb)
+        if args.init:
+            trainer.load(args.init)
+            print(f"[train] warm start from {args.init}")
         trainer.train(int(cfg.training.max_steps), **log_kw)
         if cfg.training.lbfgs_steps:
             trainer.lbfgs(int(cfg.training.lbfgs_steps))
