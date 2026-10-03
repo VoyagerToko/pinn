@@ -58,5 +58,7 @@ probability proportional to $|r|/\mathbb E|r|+1$, keeping 20\% uniform.
 \paragraph{Training.} Adam~\cite{kingma2015adam} with a linear warm-up to $10^{-3}$ and decay by 0.9 every 2000
 steps, followed optionally by L-BFGS~\cite{liu1989lbfgs} on one fixed batch. The cavity uses the curriculum
 $\Rey=100\to400\to1000$ (20k, 40k, 140k steps) and the DeepONet a widening range $\Rey\le200,500,1000$ (40k, 40k,
-120k), both carrying the weights over and restarting the optimiser~\cite{krishnapriyan2021failure}. The cylinder is
+120k), both carrying the weights over and restarting the optimiser~\cite{krishnapriyan2021failure}; the
+DeepONet diverged at a peak rate of $10^{-3}$ and was trained at $3\times10^{-4}$ with the gradient norm clipped
+at 1. The cylinder is
 marched in windows of $0.5$~s, each starting from the previous window's network and final state.

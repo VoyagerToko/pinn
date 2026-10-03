@@ -24,7 +24,7 @@ D soft lid & & & 1.04\% & 2.20\% & 1.9\%\\
 E & $1.8\times10^{-2}$ & 0 & \multicolumn{3}{c}{(= D)}\\
 F exact lid & $1.7\times10^{-2}$ & 0 & 19.5\% & 19.8\% & 25.8\%\\
 F soft lid & & & 16.0\% & 15.6\% & 21.0\%\\
-G soft lid & $1.2\times10^{-2}$ & 0 & \pending{} & \pending{} & \pending{}\\
+G & $1.2\times10^{-2}$ & 0 & \multicolumn{3}{c}{not run at 200k$^{\dagger}$}\\
 \midrule
 FD, same lid & & & 0.41\% & 2.29\% & --\\
 \bottomrule
@@ -103,9 +103,14 @@ needed one 11~GB buffer and did not fit, so this run used $32^4$ points and a qu
 \subsection{Inverse problem and parametric model}
 From 5000 velocity samples the wake network recovered $\lambda_1=0.99997$ and $\lambda_2=0.010006$ (errors 0.004\%
 and 0.065\%) and the pressure, never observed, to 2.44\% (velocity 0.54\% and 2.69\%) on 20 snapshots, with a
-quarter of the planned budget. A first DeepONet run that sampled $\Rey$ up to 1000 from the start reached 10.5\%
-at $\Rey=100$ after 5k steps and then diverged (70--87\% at the end). \pending{curriculum DeepONet: errors at 100,
-400 (unseen), 1000; gate.}
+quarter of the planned budget. The DeepONet first diverged twice: sampling $\Rey$ up to 1000 from the start, and
+again with the curriculum, in both cases as soon as the warm-up reached the peak rate of $10^{-3}$ (10.5\% and
+7.8\% at $\Rey=100$ after 5k steps, after which both diverged; the first ended at 70--87\%). At $3\times10^{-4}$ with
+clipping, training was stable: after the 200k-step curriculum the error against the FD field was 2.3\% at $\Rey=100$,
+14.0\% at the unseen $\Rey=400$ and 40\% at $\Rey=1000$; a 150k-step continuation over the full range brought these
+to 2.0\%, 11.1\% and 33.5\%, at which
+point the decayed learning rate stopped further progress. \pending{cont2: errors and gate.} The high end of the
+range is the weak part of the model, as for the single-$\Rey$ cavity, which needed 140k steps at $\Rey=1000$ alone.
 
 \subsection{Cost}
 \begin{table}[t]
