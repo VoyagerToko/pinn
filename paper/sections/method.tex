@@ -1,155 +1,62 @@
 \section{Method}
 \label{sec:method}
 
-\subsection{Governing equations and residuals}
-All problems are solved in non-dimensional form. With a reference velocity $U$, length $L$ and kinematic
-viscosity $\nu$, the Reynolds number is $\Rey=UL/\nu$, and velocity $\bu=(u,v[,w])$, pressure $p$ (divided by
-the constant density) and time are scaled by $U$, $U^2$ and $L/U$. For a network output that provides $\bu$
-and $p$ at a point $z=(t,\bx)$ we define the momentum and continuity residuals
-\begin{align}
-\mathbf{r}_m(z) &= \partial_t\bu + \lambda_1(\bu\cdot\nabla)\bu + \nabla p - \lambda_2\,\nabla^2\bu, \label{eq:rm}\\
-r_c(z) &= \nabla\cdot\bu, \label{eq:rc}
-\end{align}
-with $\lambda_1=1$ and $\lambda_2=1/\Rey$ in every forward problem. In the inverse problem the two
-coefficients are free parameters learnt together with the network. Steady problems drop $\partial_t\bu$.
-
-Three output parametrisations are used. In the \emph{velocity--pressure} (VP) form the network returns
-$(\bu,p)$ directly and continuity is a loss term. In two dimensions the \emph{stream-function} form returns
-$(\psi,p)$ and sets $u=\partial_y\psi$, $v=-\partial_x\psi$, so that $\nabla\cdot\bu=\partial_{xy}\psi-
-\partial_{yx}\psi$ vanishes identically; the momentum residual then contains third derivatives of $\psi$. In
-three dimensions the \emph{vector-potential} form returns $(\mathbf{A},p)$ with $\bu=\nabla\times\mathbf{A}$,
-again divergence-free by construction. Since $\mathbf{A}$ is defined only up to a gradient, a weak Coulomb gauge
-$\lambda_g\langle(\nabla\cdot\mathbf{A})^2\rangle$ with $\lambda_g=10^{-3}$ is added to the loss.
-
-\paragraph{Derivatives.} For a point-wise network $f:\mathbb{R}^d\to\mathbb{R}^k$ every derivative in
-\eqref{eq:rm}--\eqref{eq:rc} is obtained as a directional derivative in forward mode: the Jacobian--vector
-product $f'(z)\,e_i$ with the unit vector $e_i$ gives $\partial_i f$ for all outputs at once, and nesting
-two such products gives $\partial_i f$ and $\partial_{ii} f$ together. A VP residual in $d_s$ spatial
-dimensions therefore costs one first-order and $d_s$ second-order directional derivatives; the stream-function
-and vector-potential residuals apply the same operator to a velocity that is itself a directional
-derivative. No Jacobian or Hessian tensor is formed. An earlier version of the code that built full
-Jacobian and Hessian tensors needed 63~GB for a stream-function batch that the directional form evaluates in
-a few gigabytes. Reverse-mode differentiation of the loss with respect to the parameters is then applied on
-top. To bound memory, the residual is evaluated over a batch in chunks of 2048 points that are
-rematerialised in the backward pass, so peak memory scales with the chunk and not with the batch.
-
-\subsection{Network architectures}
-\paragraph{Input embeddings.} Periodic coordinates enter through $(\cos\omega x,\sin\omega x)$ with
-$\omega=2\pi/P$, which makes the representation exactly periodic with period $P$. Non-periodic inputs,
-normalised to $O(1)$, are passed through random Fourier features~\cite{tancik2020fourier}
+\paragraph{Equations.} All problems are non-dimensional with $\Rey=UL/\nu$. For a network providing velocity
+$\bu$ and pressure $p$ at $z=(t,\bx)$ the residuals are
 \begin{equation}
-\gamma(z)=\big[\cos(Bz),\ \sin(Bz)\big],\qquad B_{ij}\sim\mathcal{N}(0,\sigma^2),
+\mathbf{r}_m=\partial_t\bu+\lambda_1(\bu\cdot\nabla)\bu+\nabla p-\lambda_2\nabla^2\bu,\qquad r_c=\nabla\cdot\bu,
+\label{eq:rm}
 \end{equation}
-with 128 frequencies (256 features). The scale $\sigma$ is a per-benchmark choice: $\sigma=1$ for the
-Taylor--Green and cylinder problems, $\sigma=10$ for the cavity, $\sigma=2$ for the wake inverse problem.
+with $\lambda_1=1$, $\lambda_2=1/\Rey$ in forward problems and both learnt in the inverse problem. Three output
+forms are used: velocity--pressure (VP), where $r_c$ is a loss term; a stream function in two dimensions,
+$u=\partial_y\psi$, $v=-\partial_x\psi$, for which $\nabla\cdot\bu\equiv0$; and a vector potential in three,
+$\bu=\nabla\times\mathbf{A}$, with a weak gauge penalty $10^{-3}\langle(\nabla\cdot\mathbf{A})^2\rangle$. Every
+derivative is a forward-mode directional derivative: the Jacobian--vector product of the network with a unit
+vector $e_i$ gives $\partial_i$ of all outputs, and two nested products give $\partial_{ii}$. No Jacobian or Hessian
+tensor is formed (an earlier version that did so needed 63~GB for one stream-function batch), and the batch is
+evaluated in rematerialised chunks of 2048 points, so memory grows with the chunk rather than the batch.
 
-\paragraph{Modified MLP and weight factorisation.} The main point-wise architecture is the gated network
-of~\cite{wang2021gradient}. From the embedding $h_0=\gamma(z)$ two encodings
-$U=\tanh(W_Uh_0+b_U)$ and $V=\tanh(W_Vh_0+b_V)$ are formed once, and each hidden layer computes
+\paragraph{Architecture.} Periodic coordinates enter as $(\cos\omega x,\sin\omega x)$, which makes the
+network exactly periodic; other inputs, scaled to $O(1)$, pass through random Fourier
+features~\cite{tancik2020fourier} $\gamma(z)=[\cos Bz,\sin Bz]$ with $B_{ij}\sim\mathcal N(0,\sigma^2)$ and 128
+frequencies ($\sigma=1$ for the Taylor--Green and cylinder problems, 10 for the cavity, 2 for the wake). The
+main network is the gated MLP of~\cite{wang2021gradient}: two encodings $U=\tanh(W_U\gamma+b_U)$ and
+$V=\tanh(W_V\gamma+b_V)$ are mixed into every hidden layer, $h_\ell=g_\ell\odot U+(1-g_\ell)\odot V$ with
+$g_\ell=\tanh(W_\ell h_{\ell-1}+b_\ell)$, six layers of width 256 unless stated otherwise. Each weight matrix is
+factorised as $W=V\mathrm{diag}(e^{s})$, $s\sim\mathcal N(1,0.1^2)$~\cite{wang2022rwf}. For the three-dimensional
+problem the network is separable~\cite{cho2023spinn}, $f_o=\sum_{j=1}^{128}\prod_{i}f^{(i)}_{o,j}(z_i)$ over the four
+inputs, with one small network per input; on a tensor grid it is evaluated once per grid line, and a
+Jacobian--vector product with a vector of ones along one axis gives the exact partial derivative at every grid
+point. The parametric cavity uses a DeepONet~\cite{lu2021deeponet,wang2021pideeponet},
+$G(a)(\bx)=\sum_{k=1}^{128}b_k(a)\tau_k(\bx)+b_0$ with $a=(\log_{10}\Rey-2)/2$, a three-layer branch and a
+gated six-layer trunk.
+
+\paragraph{Exact constraints and a compatibility condition.} Dirichlet data are built into the ansatz
+$\hat\bu=g+\varphi N_\theta$, where $g$ carries the boundary values and $\varphi$ vanishes on the
+boundary~\cite{lagaris1998,sukumar2022distance}. For the cavity $\varphi=x(1-x)y(1-y)$ and $g=(u_{\rm lid}(x)y^8,0)$
+with the regularised lid $u_{\rm lid}=1-\cosh(r(x-\frac12))/\cosh(\frac r2)$, $r=50$; for the channel a bounded
+product of $\tanh(x/2r)$, $4y(H-y)/H^2$ and $\tanh(d/r^2)$ with $d$ the squared distance to the cylinder rim. The
+lid profile vanishes at the corners but has slope $\mp r\tanh(r/2)\approx\mp50$ there. If lid and side walls are
+both exact, then $\partial_yv=0$ along the side wall while continuity on the lid demands
+$\partial_yv=-u'_{\rm lid}$: no continuously differentiable field satisfies both, and $|\nabla\cdot\hat\bu|=O(r)$ in
+corner patches of width $O(1/r)$ whatever the network does. A \emph{soft-lid} variant keeps no-slip and $v=0$ exact
+and enforces only the tangential lid velocity through a loss term.
+
+\paragraph{Loss and weighting.} The objective is $\sum_i\lambda_i\mathcal L_i$ over mean-square residual, boundary,
+initial-condition, outflow, data and pressure-anchor terms. Gradient-norm balancing~\cite{wang2021gradient,
+wang2023expert} sets $\hat\lambda_i=\overline G/G_i$ every 1000 steps, with $G_i=\|\nabla_\theta\mathcal L_i\|$ and
+$\overline G$ their mean, and smooths $\lambda_i\leftarrow0.9\lambda_i+0.1\hat\lambda_i$; terms that can vanish
+exactly (pressure anchor, gauge) keep weight one. Causal weighting~\cite{wang2024causality} sorts the residual
+points in time, splits them into $M$ chunks with losses $\mathcal L_k$ and uses
 \begin{equation}
-g_\ell=\tanh(W_\ell h_{\ell-1}+b_\ell),\qquad h_\ell=g_\ell\odot U+(1-g_\ell)\odot V,
+\mathcal L_r=\frac1M\sum_k w_k\mathcal L_k,\qquad w_k=\exp\Big(-\varepsilon\sum_{j<k}\mathcal L_j\Big),
 \end{equation}
-followed by a linear output layer. We use six hidden layers of width 256 unless stated otherwise (eight of
-width 128 for the inverse problem; GELU instead of tanh for the cylinder). Every weight matrix is
-factorised as $W=V\,\mathrm{diag}(e^{s})$ with $s\sim\mathcal{N}(1,0.1^2)$ at initialisation, and $V$ and $s$ are
-trained jointly~\cite{wang2022rwf}; the factorisation is folded back into a plain matrix for inference.
-Ablation rows without the modified MLP use a plain tanh MLP of the same depth without factorisation.
+with the weights held constant in the gradient and $\varepsilon$ raised through $10^{-2},\dots,10^2$ whenever
+$\min_kw_k>0.99$. Every 1000 steps residual-based sampling~\cite{wu2023rad} redraws a pool of 65{,}536 points with
+probability proportional to $|r|/\mathbb E|r|+1$, keeping 20\% uniform.
 
-\paragraph{Exact boundary conditions.} Dirichlet data can be built into the ansatz~\cite{lagaris1998,
-sukumar2022distance},
-\begin{equation}
-\hat\bu(z)=g(z)+\varphi(z)\,N_\theta(z),
-\label{eq:hard}
-\end{equation}
-where $g$ is any smooth function carrying the boundary values, $\varphi$ vanishes on the Dirichlet boundary
-and is positive inside, and $N_\theta$ is the network. For the unit cavity $\varphi=x(1-x)y(1-y)$ and
-$g=(u_{\mathrm{lid}}(x)\,y^{8},0)$; the high power keeps $g$ in a thin layer below the lid so that $N_\theta$
-does not have to cancel a shear across the whole cavity. For the DFG channel $[0,2.2]\times[0,0.41]$ with a
-cylinder of radius $r=0.05$ at $(0.2,0.2)$ we use
-\begin{equation}
-\varphi=\tanh\!\Big(\frac{x}{2r}\Big)\,\frac{4y(H-y)}{H^2}\,\tanh\!\Big(\frac{d}{r^2}\Big),\quad
-d=(x-0.2)^2+(y-0.2)^2-r^2,
-\end{equation}
-which vanishes on the inlet, both walls and the cylinder but stays bounded in $[0,1]$ over the channel, and
-$g_u=u_{\mathrm{in}}(y)\,d/(d+x)$, $g_v=0$. Only the outflow condition remains a loss term. The product of the
-three polynomial factors without saturation, a common textbook choice, grows by four orders of magnitude
-between the cylinder and the outlet, which conditions the network poorly.
-
-\paragraph{A compatibility obstruction at the cavity corners.} The regularised lid profile used here,
-$u_{\mathrm{lid}}(x)=1-\cosh(r(x-\tfrac12))/\cosh(\tfrac r2)$ with $r=50$, vanishes at $x=0$ and $x=1$ but has
-slope $u'_{\mathrm{lid}}(1)=-r\tanh(r/2)\approx-50$. If \eqref{eq:hard} imposes both the lid and the no-slip
-side walls exactly, then along $x=1$ the velocity vanishes identically, so $\partial_yv=0$ at the corner, while
-along $y=1$ continuity demands $\partial_yv=-\partial_xu=-u'_{\mathrm{lid}}$. No continuously differentiable
-field satisfies both, so $\nabla\cdot\hat\bu=O(r)$ in a corner patch of width $O(1/r)$ whatever the network
-does: a mean-square continuity floor of order $10^{-2}$. We therefore also use a variant in which the
-distance function for $u$ is $x(1-x)y$ (zero on the three fixed walls only) while $v$ keeps the full
-$\varphi$; the tangential lid velocity is then enforced by a loss term $L_{\mathrm{lid}}$ on the lid. We call
-this the \emph{soft-lid} constraint; Section~\ref{sec:res-cavity} tests both.
-
-\paragraph{Separable PINN.} For the three-dimensional unsteady problem the network is separable in its four
-inputs~\cite{cho2023spinn}: each output component is
-\begin{equation}
-f_o(t,x,y,z)=\sum_{j=1}^{R} f^{(t)}_{o,j}(t)\,f^{(x)}_{o,j}(x)\,f^{(y)}_{o,j}(y)\,f^{(z)}_{o,j}(z),
-\end{equation}
-where each factor is the output of a small network of one variable (four gated layers of width 64, rank
-$R=128$). Periodic spatial axes are embedded with the harmonics $\cos kx,\sin kx$, $k=1,\dots,4$. On a tensor
-grid of $n_t\times n_x\times n_y\times n_z$ points the network is evaluated $n_t+n_x+n_y+n_z$ times, and a
-Jacobian--vector product with a tangent of ones along one axis returns the exact partial derivative along
-that axis at every grid point, because each grid value depends on a single entry of each coordinate vector.
-
-\paragraph{Physics-informed DeepONet.} For the parametric cavity the solution operator is represented
-as~\cite{lu2021deeponet,wang2021pideeponet}
-\begin{equation}
-G_\theta(a)(\bx)=\sum_{k=1}^{p}b_k(a)\,\tau_k(\bx)+b_0,\qquad p=128,
-\end{equation}
-with the scaled parameter $a=(\log_{10}\Rey-2)/2$, a branch network $b$ (three tanh layers of width 256)
-and a trunk $\tau$ that is a modified MLP with Fourier features (six layers of width 256), separately for
-each of the three outputs. The physics loss is applied to $G_\theta(a)$ for a random set of Reynolds numbers
-in every step; the boundary treatment is the same as for the single-$\Rey$ cavity.
-
-\subsection{Loss function and weighting}
-The objective is a weighted sum of mean-square terms,
-\begin{equation}
-\mathcal{L}(\theta)=\sum_i\lambda_i\,\mathcal{L}_i(\theta),
-\end{equation}
-where the terms are, depending on the problem, the momentum residual per component
-($\mathcal{L}_{r_u},\mathcal{L}_{r_v},\dots$), the continuity residual (VP only), boundary and lid mismatches
-(soft constraints only), initial-condition mismatches, the outflow residual, data mismatch (inverse problem),
-the vector-potential gauge and a pressure anchor. In closed or periodic domains the pressure is fixed by
-$\mathcal{L}_p=\big(\tfrac1N\sum_ip(z_i)\big)^2$, which enforces zero mean.
-
-\paragraph{Gradient-norm balancing.} Following~\cite{wang2021gradient,wang2023expert}, every 1000 steps we
-compute $\hat\lambda_i=\overline{G}/G_i$ with $G_i=\|\nabla_\theta\mathcal{L}_i\|_2$ and $\overline{G}$ the mean of
-all $G_i$, and update $\lambda_i\leftarrow0.9\lambda_i+0.1\hat\lambda_i$. Terms that can be driven to exactly
-zero (the pressure anchor and the gauge) are kept at weight one, since their gradient norm vanishes and the
-update would diverge.
-
-\paragraph{Causal weights.} For unsteady problems the residual points of a batch are sorted in time and
-split into $M$ equal chunks with mean square residuals $\mathcal{L}_1,\dots,\mathcal{L}_M$. The residual
-loss is replaced by
-\begin{equation}
-\mathcal{L}_r=\frac1M\sum_{k=1}^{M}w_k\mathcal{L}_k,\qquad w_k=\exp\Big(-\varepsilon\sum_{j<k}\mathcal{L}_j\Big),
-\end{equation}
-with the weights treated as constants in the gradient~\cite{wang2024causality}; with several residual
-equations the element-wise minimum of their weights is used. Later chunks thus receive gradient only once
-the earlier ones are resolved. The tolerance $\varepsilon$ is raised through $10^{-2},10^{-1},1,10,100$
-whenever $\min_kw_k>0.99$ (checked every 1000 steps); $M=32$ for the cylinder and $M=16$ along the time axis of
-the separable grid.
-
-\paragraph{Residual-based adaptive sampling.} Every 1000 steps $10^5$ candidate points are drawn uniformly and
-a pool of 65{,}536 collocation points is resampled with probability proportional to
-$|r(z)|/\mathbb{E}|r|+1$~\cite{wu2023rad}; 20\% of the pool is kept uniform so that sampling cannot collapse
-onto one region. Batches are then drawn from the pool.
-
-\subsection{Training procedure}
-Stage one is Adam~\cite{kingma2015adam} with a linear warm-up to a learning rate of $10^{-3}$ followed by
-exponential decay by a factor 0.9 every 2000 steps, in single precision with the highest matrix-multiply
-precision. Stage two is limited-memory BFGS~\cite{liu1989lbfgs} (history 20, zoom line search satisfying the
-strong Wolfe conditions) on one fixed collocation batch, stopped after 50 iterations without relative
-progress above $10^{-12}$ or at an iteration cap. The cavity is trained with a Reynolds-number curriculum
-$\Rey=100\to400\to1000$ (20k, 40k and 140k steps at the full budget); the weights are carried over between
-stages and the optimiser state, including warm-up and decay, is restarted. The cylinder is marched in
-windows of $0.5$~s (five convective time units): window $n$ starts from the network of window $n-1$ and uses
-its state at the end of the window as initial condition. Both the curriculum and the marching follow the
-remedies proposed in~\cite{krishnapriyan2021failure}. The separable network uses a
-fresh random tensor grid of $32^4$ points in every step.
+\paragraph{Training.} Adam~\cite{kingma2015adam} with a linear warm-up to $10^{-3}$ and decay by 0.9 every 2000
+steps, followed optionally by L-BFGS~\cite{liu1989lbfgs} on one fixed batch. The cavity uses the curriculum
+$\Rey=100\to400\to1000$ (20k, 40k, 140k steps) and the DeepONet a widening range $\Rey\le200,500,1000$ (40k, 40k,
+120k), both carrying the weights over and restarting the optimiser~\cite{krishnapriyan2021failure}. The cylinder is
+marched in windows of $0.5$~s, each starting from the previous window's network and final state.

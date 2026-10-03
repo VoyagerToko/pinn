@@ -1,16 +1,19 @@
 \documentclass[10pt,twocolumn]{article}
 \usepackage[T1]{fontenc}
 \usepackage{lmodern}
+\usepackage[margin=1.8cm,top=1.8cm,bottom=2cm]{geometry}
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{xcolor}
-\usepackage{siunitx}
 \usepackage[numbers,sort&compress]{natbib}
 \usepackage[hidelinks]{hyperref}
 \usepackage{caption}
-\captionsetup{font=small,labelfont=bf}
-\sisetup{group-separator={,}}
+\captionsetup{font=small,labelfont=bf,skip=4pt}
+\setlength{\bibsep}{1pt}
+\renewcommand{\bibfont}{\footnotesize}
+\setlength{\textfloatsep}{8pt plus 2pt minus 2pt}
+\setlength{\floatsep}{6pt plus 2pt minus 2pt}
 
 \newcommand{\pending}[1]{\textcolor{red}{[#1]}}
 \newcommand{\Rey}{\mathrm{Re}}
@@ -18,7 +21,7 @@
 \newcommand{\bx}{\mathbf{x}}
 \newcommand{\dd}{\,\mathrm{d}}
 
-\title{Physics-informed neural networks on a ladder of incompressible-flow benchmarks:\\
+\title{\Large Physics-informed neural networks on six incompressible-flow benchmarks:\\
 what the components contribute, where they fail, and what they cost}
 \author{[Author name(s) and affiliation to be added]}
 \date{}
@@ -35,12 +38,10 @@ what the components contribute, where they fail, and what they cost}
 \input{sections/setup}
 \input{sections/results}
 \input{sections/discussion}
-\input{sections/conclusion}
 
-\section*{Acknowledgements}
-The code base and the drafting of this manuscript were assisted by an AI tool (a large language model used as a
-programming and writing assistant). All numerical results were produced by the code in the accompanying
-repository and were checked against its logs; responsibility for the content lies with the human author(s).
+\paragraph{Acknowledgements.} The code and the drafting of this manuscript were assisted by an AI tool (a large
+language model used as a programming and writing assistant). All results were produced by the code in the
+accompanying repository and checked against its logs; responsibility for the content lies with the author(s).
 
 \bibliographystyle{unsrtnat}
 \bibliography{references}

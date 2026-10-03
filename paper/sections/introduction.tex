@@ -1,61 +1,35 @@
 \section{Introduction}
 \label{sec:intro}
+Finite-volume, finite-element and spectral solvers for the incompressible Navier--Stokes equations are fast and
+well understood for a fixed geometry and fixed parameters. Physics-informed neural networks~\cite{raissi2019pinn}
+take another route: a network represents velocity and pressure as smooth functions of space and time, the
+residuals of the equations are evaluated at scattered points by automatic differentiation, and training drives
+these residuals and the boundary and initial mismatches towards zero. No mesh is needed, derivatives of the
+representation are exact, and measurements can enter the same objective, which suits flow reconstruction from
+sparse data~\cite{raissi2020hfm} and surrogates queried at arbitrary points.
 
-Incompressible viscous flow is governed by the Navier--Stokes equations, a coupled, nonlinear system in
-which the pressure acts as a Lagrange multiplier for the divergence-free constraint. Finite-volume,
-finite-element and spectral solvers have been refined for this system over five decades; for a fixed
-geometry and a fixed set of parameters they are fast, robust and come with a mature theory of discretisation
-error. Physics-informed neural networks (PINNs)~\cite{raissi2019pinn} approach the same equations from a
-different direction. A neural network represents the solution as a smooth function of space and time, the
-residuals of the differential equations are evaluated at scattered points by automatic differentiation, and
-the network parameters are chosen to make these residuals, together with boundary and initial mismatches,
-small in a least-squares sense. No mesh is built, derivatives of the representation are exact, and measured
-data can be added to the same objective, which makes the approach attractive for flow reconstruction from
-sparse observations~\cite{raissi2020hfm} and for surrogates that are queried continuously.
+The optimisation behind this is often badly conditioned. Networks resolve smooth components first, the loss
+terms have gradients of very different size, unsteady solutions can be learnt out of temporal order, and
+convection-dominated problems collapse onto trivial
+states~\cite{wang2021gradient,wang2022ntk,krishnapriyan2021failure}. Proposed remedies include Fourier
+features~\cite{tancik2020fourier}, gated networks and gradient-based loss balancing~\cite{wang2021gradient},
+kernel-based weights~\cite{wang2022ntk}, causal weighting~\cite{wang2024causality}, adaptive
+sampling~\cite{wu2023rad}, weight factorisation~\cite{wang2022rwf}, residual architectures~\cite{wang2024piratenets},
+divergence-free outputs~\cite{jin2021nsfnets}, exact boundary constraints~\cite{lagaris1998,sukumar2022distance},
+separable networks~\cite{cho2023spinn}, domain decomposition~\cite{jagtap2020xpinn} and operator
+learning~\cite{lu2021deeponet,wang2021pideeponet,li2021fno}; practical advice is collected
+in~\cite{wang2023expert}. Each remedy is usually shown on the problem that motivated it.
 
-The price of this flexibility is an optimisation problem that is often badly conditioned. Plain
-multilayer perceptrons fit smooth components first and resolve sharp features late or never; the loss is a
-sum of terms whose gradients differ by orders of magnitude; the solution of an unsteady problem can be
-learnt out of temporal order; and convection-dominated flows make the landscape stiff enough that training
-collapses onto trivial or steady states~\cite{wang2021gradient,wang2022ntk,krishnapriyan2021failure}. A
-sizeable literature proposes remedies: random Fourier features against spectral
-bias~\cite{tancik2020fourier}, gated (modified) multilayer perceptrons and gradient-based loss
-balancing~\cite{wang2021gradient}, weights derived from the neural tangent kernel~\cite{wang2022ntk},
-causal weighting in time~\cite{wang2024causality}, residual-based adaptive sampling~\cite{wu2023rad}, random
-weight factorisation~\cite{wang2022rwf}, adaptive residual architectures~\cite{wang2024piratenets}, exactly
-divergence-free output parametrisations~\cite{jin2021nsfnets}, boundary conditions built into the
-ansatz~\cite{lagaris1998,sukumar2022distance}, separable networks that make three-dimensional unsteady
-problems affordable~\cite{cho2023spinn}, domain decomposition~\cite{jagtap2020xpinn} and operator
-learning over families of problems~\cite{lu2021deeponet,wang2021pideeponet,li2021fno}. Practical
-recommendations that combine several of these are collected in~\cite{wang2023expert}.
-
-Individual remedies are usually reported on the problem that motivated them, and the combined recipe is
-seldom tested against independent references with the failures documented. This paper does that for one
-code base and one set of choices. We implemented the components above in JAX~\cite{jax2018github}, following
-the design of JAX-PI~\cite{jaxpi} and SPINN~\cite{spinncode} but with our own residual and memory handling,
-and applied them to a ladder of standard problems: the two-dimensional Taylor--Green vortex with its exact
-solution, the lid-driven cavity against Ghia et al.~\cite{ghia1982}, the DFG 2D-2 cylinder benchmark of
-Sch\"afer and Turek~\cite{schaefer1996}, the three-dimensional Taylor--Green vortex at $\Rey=1600$, an inverse
-problem on the cylinder-wake data of~\cite{raissi2019pinn}, and a physics-informed DeepONet over the cavity
-Reynolds number. Each benchmark has an acceptance gate fixed before training.
-
-The contributions are the following.
-\begin{enumerate}
-\item A single, tested implementation in which every residual is assembled from forward-mode directional
-  derivatives and evaluated in rematerialised chunks, so that third-order derivatives of a six-layer network
-  on $\sim\!10^4$ points per step fit in about 1.6~GB of GPU memory.
-\item An independent finite-difference reference for the regularised-lid cavity. It shows that a
-  grid-converged solution of the benchmark as posed differs from the Ghia $v$ table by 2.3\%, so a 2\% gate
-  against that table cannot be met even by an exact solution; the PINN is instead graded against the converged
-  field of the same problem, which it reproduces to 0.27\%.
-\item An attribution of the cavity failures. Imposing the regularised lid exactly is incompatible with
-  continuity at the two top corners, which leaves an irreducible divergence residual; gradient-norm loss
-  balancing then drives the weight of a softly imposed lid up until the incompatibility returns. Both effects
-  are shown in controlled runs.
-\item Results for all six problems with the cost of each run (wall-clock, step time, memory, inference
-  throughput), including the gates that were missed and the budgets that had to be reduced.
-\end{enumerate}
-
-Section~\ref{sec:method} describes the formulations, architectures, losses and training procedure;
-Section~\ref{sec:setup} the benchmarks, reference data and protocol; Section~\ref{sec:results} the results;
-Section~\ref{sec:discussion} discusses them against classical solvers and lists the limitations.
+We test the combination in one code base, built in JAX~\cite{jax2018github} along the lines of
+JAX-PI~\cite{jaxpi} and SPINN~\cite{spinncode}, on a ladder of problems with gates fixed before training: the
+two-dimensional Taylor--Green vortex (exact solution), the lid-driven cavity against Ghia et
+al.~\cite{ghia1982}, the DFG cylinder benchmark of Sch\"afer and Turek~\cite{schaefer1996}, the
+three-dimensional Taylor--Green vortex at $\Rey=1600$, an inverse problem on the wake data
+of~\cite{raissi2019pinn}, and a DeepONet over the cavity Reynolds number. Our contributions are:
+(i) a memory-bounded implementation in which all residuals are built from forward-mode directional derivatives;
+(ii) an independent finite-difference reference for the regularised-lid cavity, which shows that the 2\% Ghia gate
+cannot be met even by an exact solution, and against which the best network is 0.27\% off;
+(iii) a diagnosis of three ways in which the full recipe produces networks that break conservation: exact lid
+data incompatible with continuity, an impulsive inflow, and gradient-norm weights of up to $6\times10^9$ on
+terms that are already satisfied; (iv) results and costs for every run, including the failed gates and the
+reduced budgets.

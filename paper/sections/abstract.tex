@@ -1,1 +1,13 @@
-\pending{abstract - written last, from the final numbers.}
+Physics-informed neural networks (PINNs) are often presented as mesh-free solvers for fluid flow, but the
+combination of remedies that makes them train is rarely tested against independent references with its
+failures reported. We implemented that combination (Fourier features, gated networks with weight factorisation,
+exact boundary and divergence constraints, causal and gradient-norm loss weighting, adaptive resampling,
+separable networks and a physics-informed DeepONet) in one JAX code base and ran it on six problems with
+acceptance criteria fixed in advance. The two-dimensional Taylor--Green vortex was solved to a velocity error
+of $4.05\times10^{-5}$ and the inverse cylinder-wake problem recovered both equation coefficients to better than
+0.1\%. On the lid-driven cavity at $\Rey=1000$ the best network is 0.27\% from a converged finite-difference
+solution of the same problem, yet misses a 2\% gate against the classical Ghia tables, which an exact solution
+also misses. Imposing the regularised lid exactly, an impulsive inflow and gradient-norm weighting each produced
+networks that violate mass or energy conservation, and the cylinder and three-dimensional Taylor--Green gates
+were not met within a one-day GPU budget. \pending{DeepONet sentence.} We report all runs, their costs and the
+reasons for each failure.

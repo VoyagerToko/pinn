@@ -1,104 +1,135 @@
 \section{Results}
 \label{sec:results}
 
-Table~\ref{tab:gates} summarises the acceptance gates; the subsections give the detail. All numbers are
-taken from the run logs and evaluation files of the repository.
-
-\input{sections/table_gates}
+\begin{table}[t]
+\centering
+\caption{Ablation. A: Taylor--Green 2D after 3k Adam steps (velocity error, maximum divergence). B: cavity at
+$\Rey=1000$ after the full 200k-step curriculum, end of Adam: Ghia errors and velocity error against the
+$512^2$ finite-difference (FD) field. D and F are given with the exact lid and with the soft lid; E equals D for
+the steady cavity.}
+\label{tab:ablation}
+\small
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+ & \multicolumn{2}{c}{A, 3k steps} & \multicolumn{3}{c}{B, 200k steps}\\
+\cmidrule(lr){2-3}\cmidrule(lr){4-6}
+row & error & max div & Ghia $u$ & Ghia $v$ & vs FD\\
+\midrule
+A & $8.7\times10^{-3}$ & $1.4\times10^{-2}$ & \pending{} & \pending{} & \pending{}\\
+B & $2.3\times10^{-2}$ & $6.4\times10^{-2}$ & \pending{} & \pending{} & \pending{}\\
+C & $3.2\times10^{-2}$ & $7.7\times10^{-2}$ & 0.65\% & 2.06\% & 0.25\%\\
+D exact lid & $2.2\times10^{-2}$ & 0 & 21.3\% & 20.0\% & 28.3\%\\
+D soft lid & & & 1.04\% & 2.20\% & 1.9\%\\
+E & $1.8\times10^{-2}$ & 0 & \multicolumn{3}{c}{(= D)}\\
+F exact lid & $1.7\times10^{-2}$ & 0 & 19.5\% & 19.8\% & 25.8\%\\
+F soft lid & & & 16.0\% & 15.6\% & 21.0\%\\
+G soft lid & $1.2\times10^{-2}$ & 0 & \pending{} & \pending{} & \pending{}\\
+\midrule
+FD, same lid & & & 0.41\% & 2.29\% & --\\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{A: two-dimensional Taylor--Green vortex}
-The full configuration (row G, stream-function output, 50k Adam steps and 1.2k L-BFGS iterations) reaches a
-relative velocity error of $4.05\times10^{-5}$ ($u$: $4.17\times10^{-5}$, $v$: $3.93\times10^{-5}$) and a
-pressure error of $2.59\times10^{-4}$ after the per-slice gauge alignment; the divergence is zero to machine
-precision because of the stream-function form. The gate ($10^{-4}$) is passed with a factor 2.5 to spare.
-Without the per-slice alignment, i.e.\ with a single constant for the whole space--time domain, the pressure
-error of the same model would be reported as $3.3\times10^{-2}$, which illustrates how much of a
-``pressure error'' can be gauge rather than physics. Training took about two hours at 0.139~s per step;
-the trained network answers $3.9\times10^6$ velocity queries per second (stream-function velocities include one
-derivative). Figure~\ref{fig:tgv2d} shows that the remaining error is spread uniformly over the domain at the
-$10^{-5}$ level, without structure tied to the vortices.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{figures/tgv2d.pdf}
-\caption{Benchmark A at $t=1$: vorticity of the trained network (row G) and the pointwise magnitude of its
-velocity error against the exact solution.}
-\label{fig:tgv2d}
-\end{figure}
+The full configuration (row G, stream function, 50k Adam steps) reaches a velocity error of $4.05\times10^{-5}$
+and a pressure error of $2.59\times10^{-4}$ with zero divergence, passing the gate by a factor of 2.5. Comparing
+pressure with a single constant over the whole space--time domain instead of per time slice would have reported
+$3.3\times10^{-2}$ for the same model, which shows how much of a pressure error can be gauge. In the short
+ablation (Table~\ref{tab:ablation}) the rows end between 0.9\% and 3.2\%; at 3k steps the plain network (A) is
+the most accurate, among the others the error falls steadily from C to G, and the stream-function rows (D--G) are
+divergence free by construction while the VP rows keep $|\nabla\cdot u|$ of $10^{-2}$--$10^{-1}$.
 
 \subsection{B: lid-driven cavity}
 \label{sec:res-cavity}
-Table~\ref{tab:cavity} collects the full-budget cavity runs and the reference solutions, all graded with the
-same metric at $\Rey=1000$; Figure~\ref{fig:cavity} shows centreline profiles and divergence maps.
-
-\begin{table*}[t]
-\centering
-\caption{Benchmark B at $\Rey=1000$, full budget (200k Adam steps over the curriculum, then up to 20k L-BFGS
-iterations). Ghia errors are relative $L^2$ errors at the tabulated stations; ``vs FD'' is the relative $L^2$
-error of the velocity field against the $512^2$ finite-difference solution of the same regularised-lid
-problem. Where L-BFGS changed the result materially, both the end-of-Adam and the final value are given.}
-\label{tab:cavity}
-\small
-\begin{tabular}{@{}lllcccc@{}}
-\toprule
-model & lid & weights & Ghia $u$ & Ghia $v$ & vs FD & wall-clock\\
-\midrule
-PINN row C (soft BC, earlier schedule$^{a}$) & soft & fixed & 0.38\% & 2.33\% & 0.12\% & 1.5 h Adam\\
-PINN row C (soft BC) & soft & fixed & 0.63\% & 2.05\% & 0.27\% & 1.6 h\\
-PINN row D, soft lid: end of Adam / after L-BFGS & soft lid & fixed & 1.04\% / 4.96\% & 2.20\% / 6.37\% & 1.9\% / 6.7\% & 3.3 h$^{b}$\\
-PINN row F, soft lid (end of Adam$^{c}$) & soft lid & grad-norm & 16.0\% & 15.6\% & 21.0\% & 1.4 h Adam\\
-PINN row D (hard lid) & hard & fixed & 21.3\% & 19.8\% & 28.3\% & 2.8 h\\
-PINN row F (hard lid) & hard & grad-norm & 19.8\% & 20.2\% & 26.1\% & 2.3 h\\
-\midrule
-FD $512^2$, regularised lid & -- & -- & 0.41\% & 2.29\% & -- & --\\
-FD $512^2$, unit lid & -- & -- & 0.89\% & 2.78\% & -- & --\\
-JAX-PI reference field ($128^2$, unit lid) & -- & -- & 2.50\% & 1.76\% & -- & --\\
-\bottomrule
-\multicolumn{7}{@{}l}{\footnotesize $^{a}$ one learning-rate schedule decaying across all three curriculum stages (before the per-stage restart).}\\
-\multicolumn{7}{@{}l}{\footnotesize $^{b}$ GPU shared with another workload during this run. $^{c}$ L-BFGS interrupted.}
-\end{tabular}
-\end{table*}
-
 \begin{figure*}[t]
 \centering
 \includegraphics[width=0.49\textwidth]{figures/cavity_profiles.pdf}\hfill
 \includegraphics[width=0.49\textwidth]{figures/cavity_divergence.pdf}
-\caption{Benchmark B at $\Rey=1000$. Left pair: centreline velocities of three PINN configurations against the
-finite-difference solution of the same regularised-lid problem (grey) and the tables of Ghia et al.\ (circles);
-the soft-boundary models lie on the FD curve. Right pair: divergence of the velocity for the fully hard lid
-(row F) and for soft boundary data (row C); the hard lid leaves $|\nabla\cdot u|\sim10$ at the two top corners
-and an unconverged interior.}
+\caption{Cavity at $\Rey=1000$. Left: centreline velocities of three configurations against the FD solution of
+the same regularised-lid problem (grey) and Ghia et al.\ (circles). Right: $|\nabla\cdot u|$ with the exact lid
+(row F) and with soft boundary data (row C); the exact lid leaves $|\nabla\cdot u|\sim10$ at the top corners and an
+unconverged interior.}
 \label{fig:cavity}
 \end{figure*}
 
-\paragraph{The gate and the reference.} No run passes the 2\% gate on $v$, but the finite-difference
-solutions show why the gate is not a useful measure at this level. As the grid is refined the unit-lid solution
-converges to the spectral benchmark value of the primary vortex~\cite{botella1998} and moves \emph{away} from
-Ghia's $v$ table (1.7\% at $128^2$, 2.1\% at $256^2$, 2.8\% at $512^2$); the converged regularised-lid solution
-is 2.29\% from it. Station by station, Ghia's $v$ values next to the right wall are about 0.01 smaller in
-magnitude than the converged fields. An exact solution of the benchmark as posed would therefore miss the gate
-on $v$. Row C is 0.27\% from the converged field of its own problem, less than the 0.56\% by which the
-$256^2$ and $512^2$ finite-difference fields differ from each other; its Ghia $v$ error (2.05\%) is below that of
-the converged solution because its small errors partly compensate Ghia's near the wall. We report the gate
-as missed, and regard the field error against the same-problem reference as the meaningful accuracy measure.
+No configuration passes the 2\% gate on $v$, and the finite-difference reference shows that none can. As the grid
+is refined the unit-lid solution converges to the spectral primary vortex~\cite{botella1998} and moves away from
+Ghia's $v$ table (1.7\% at $128^2$, 2.1\% at $256^2$, 2.8\% at $512^2$); the converged regularised-lid solution is
+2.29\% from it, because Ghia's $v$ values next to the right wall are about 0.01 smaller in magnitude than the
+converged fields. Row C (soft boundary data, fixed weights) is 0.25\% from that field at the end of Adam and
+0.27\% after L-BFGS, below the 0.56\% by which our $256^2$ and $512^2$ solutions differ (Fig.~\ref{fig:cavity}).
 
-\paragraph{Which component fails.} The fully hard constraint breaks training whether the loss weights are
-fixed (row D) or adapted (row F): in the $\Rey=1000$ stage the continuity loss does not settle below
-$\sim10^{-2}$ (median $1.6\times10^{-2}$ for row D, between $1.5\times10^{-2}$ and $2.5\times10^{-1}$ for row F),
-whereas row C drives the same term to $2\times10^{-8}$; the residual map shows the corner floor predicted in
-Section~\ref{sec:method}, and the velocity field ends 26--28\% from the reference. Replacing the exact lid by a
-loss term while keeping the other walls and $v$ exact (soft lid) restores the fixed-weight run to 1.9\% of
-the reference field after Adam. With gradient-norm weighting the same soft lid fails again (21\%): the lid
-term has small gradients, so its weight grows to about 465, which makes the soft lid effectively exact again,
-while the continuity weight is lowered to about 0.2. On this problem the two components of rows D--G that
-act on the boundary and on the loss weights are therefore harmful as specified, and the fully soft
-configuration of row C is the most accurate.
+The ablation attributes the failures. With the exact lid, rows D and F end 26--28\% from the reference whether
+the weights are fixed or adapted: continuity does not settle below $\sim10^{-2}$, whereas row C reaches
+$2\times10^{-8}$, and the divergence map shows the corner floor predicted in Section~\ref{sec:method}. The soft
+lid brings row D to 1.9\%. With gradient-norm weighting the soft lid fails again (row F, 21\%): the lid term has
+small gradients, its weight rises to about 465 and makes the lid effectively exact, while the continuity weight
+falls to 0.2. L-BFGS on one fixed batch of 8192 points is also unsafe here: on the soft-lid row D it lowered that
+loss from $2.6\times10^{-3}$ to $2.3\times10^{-6}$ and tripled the field error (1.9\% to 6.7\%).
 
-\paragraph{L-BFGS on a fixed batch.} The second optimisation stage works on one fixed draw of 8192
-collocation points. On the soft-lid row D it lowered that loss by three orders of magnitude (from
-$2.6\times10^{-3}$ to $2.3\times10^{-6}$) and at the same time tripled the error of the field (1.9\% to 6.7\%): the
-optimiser fits the chosen points, not the equations. On row C the stopping rule ended it after about 9k
-iterations with no effect on the error. Refreshing the batch between L-BFGS restarts or using a much larger
-fixed batch would be needed before the second stage can be trusted here.
+\subsection{C: flow past a cylinder}
+Four attempts with reduced budgets failed for reasons that have little to do with budget. With the VP network
+and the impulsive start of the benchmark, drag stayed between 0.3 and 0.5, a tenth of the developed value, and the flow
+rate through the channel fell to 34\% of the inflow at $x=0.6$ and 2\% at the outlet after 0.5~s: the inflow
+advanced as a slow front. A fluid at rest given the full inflow must accelerate everywhere at once, which a
+representation smooth in time cannot do, so it trades continuity for smoothness. Ramping the inflow as
+$\sin^2(\pi t/2)$ over the first second (the periodic state is unaffected) cut the continuity loss 20--80 fold,
+but still only 12\% of the inflow crossed $x=0.6$: with continuity as one loss term among eight, a small
+divergence everywhere adds up to a large loss of mass along a channel 22 diameters long. A stream-function
+network with exact divergence and soft wall data kept 75--77\% of the flow rate and reached $C_{D,\max}=1.54$ in
+two windows (1~s, still inside the ramp), against 3.22 for the developed flow; its remaining loss is leakage
+through the soft wall conditions. No run reached the shedding regime, so $St$ is undefined and the gate failed.
 
-\input{sections/results_pending}
+\subsection{D: Taylor--Green vortex at $\Rey=1600$}
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/tgv3d_energy.pdf}
+\caption{Benchmark D: kinetic energy, the two dissipation estimates of the network against the digitised
+reference~\cite{debonis2013}, and the spectrum at $t=9$.}
+\label{fig:tgv3d}
+\end{figure}
+The separable network fits the initial state ($E_k(0)=0.1246$, exact $1/8$) and then decays smoothly
+(Fig.~\ref{fig:tgv3d}). $-\dd E_k/\dd t$ is largest at $t=0$ (0.0292) and $2\nu\zeta$ never exceeds
+$4.9\times10^{-4}$, errors of 127\% and 96\% against the reference peak. The two estimates should agree and
+differ by a factor of about 60: the energy leaves through the momentum residual (mean square
+$2.5$--$7\times10^{-4}$), not through viscosity. The vertical velocity stays near zero, so there is no vortex
+stretching, and the spectrum at $t=9$ falls as $k^{-3.5}$ rather than $k^{-5/3}$. Gradient-norm weighting gave
+the initial-condition term for $w$, whose target is identically zero, a weight of $6\times10^9$. The $64^4$ grid
+needed one 11~GB buffer and did not fit, so this run used $32^4$ points and a quarter of the planned steps.
+
+\subsection{Inverse problem and parametric model}
+From 5000 velocity samples the wake network recovered $\lambda_1=0.99997$ and $\lambda_2=0.010006$ (errors 0.004\%
+and 0.065\%) and the pressure, never observed, to 2.44\% (velocity 0.54\% and 2.69\%) on 20 snapshots, with a
+quarter of the planned budget. A first DeepONet run that sampled $\Rey$ up to 1000 from the start reached 10.5\%
+at $\Rey=100$ after 5k steps and then diverged (70--87\% at the end). \pending{curriculum DeepONet: errors at 100,
+400 (unseen), 1000; gate.}
+
+\subsection{Cost}
+\begin{table}[t]
+\centering
+\caption{Cost: training wall-clock, Adam step time, peak memory of the training process and inference
+throughput (batches of 65,536 points). $^*$GPU shared with another workload.}
+\label{tab:cost}
+\footnotesize
+\setlength{\tabcolsep}{2.5pt}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+run & wall & step [s] & memory & points/s\\
+\midrule
+A, row G & 2 h & 0.139 & -- & $3.9\times10^6$\\
+B, row C & 1.6 h & 0.025 & 1.6 GB & $1.2\times10^7$\\
+B, row D soft lid$^*$ & 3.3 h & 0.035 & 1.6 GB & $8.9\times10^6$\\
+C, stream function & 1.0 h & 0.359 & 1.9 GB & $3.9\times10^6$\\
+D, row H & 1.2 h & 0.037 & 3.1 GB & $2.0\times10^8$ (grid)\\
+inverse & 0.5 h & 0.055 & 1.6 GB & $4.2\times10^6$\\
+PI-DeepONet & \pending{} & \pending{} & \pending{} & \pending{}\\
+\midrule
+FD $256^2$ / $512^2$, CPU & 10 / 57 min & & & \\
+\bottomrule
+\end{tabular}
+\end{table}
+Table~\ref{tab:cost} lists the cost of the main runs. A trained network answers $3.9\times10^6$ to
+$1.2\times10^7$ point queries per second, and the separable network $2\times10^8$ on a grid. Training is expensive: the best cavity network took
+1.6~GPU-hours, while our deliberately simple finite-difference code reached a comparable accuracy on the CPU in ten
+minutes. All runs of this study together used \pending{N} GPU hours.

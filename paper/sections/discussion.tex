@@ -1,51 +1,46 @@
-\section{Discussion}
+\section{Discussion and conclusion}
 \label{sec:discussion}
 
-\paragraph{Where the PINN did well.} On problems with smooth, compatible data the networks reached accuracies
-that are respectable for any method: a relative error of $4\times10^{-5}$ on the Taylor--Green vortex, and
-0.27\% of the converged field on the $\Rey=1000$ cavity with soft boundary data, below the discretisation
-error of our own $256^2$ finite-difference solution. The result is a single differentiable function of space
-(and time) that can be evaluated at $3.9$--$12\times10^6$ points per second, differentiated exactly and sampled at
-any resolution, which is what the vortex-tube renderings and the drag and lift integrals of this paper
-use. The inverse problem, where sparse velocities must be reconciled with the equations and unknown
-coefficients, and the parametric surrogate, where one training run serves a range of Reynolds numbers, are
-the settings in which this representation is used as intended (Sections~\ref{sec:res-inverse}
-and~\ref{sec:res-deeponet}).
+\paragraph{Where the networks did well.} With smooth and compatible data the method is accurate: $4\times10^{-5}$
+on the two-dimensional vortex and 0.27\% of a converged field on the $\Rey=1000$ cavity. The inverse problem, in
+which sparse velocities and unknown coefficients have to be reconciled with the equations, is where the approach
+is clearly useful: two coefficients to better than 0.1\% and a pressure field that was never measured to 2.4\%,
+at a cost of half a GPU-hour. The trained networks are continuous, differentiable functions that can be queried
+at millions of points per second and sampled at any resolution; the drag integrals, divergence maps and the
+vortex-tube animation of this study use exactly that.
 
-\paragraph{Where a classical solver wins.} For a single forward solve the comparison is not close. Our
-finite-difference code, an explicit pseudo-time solver chosen for simplicity rather than speed, produced the
-$256^2$ regularised-lid solution at $\Rey=1000$ in about ten minutes on the CPU and the $512^2$ solution in 57
-minutes; the best PINN needed 1.6~GPU-hours for comparable accuracy and several configurations of the same
-method missed by 20--28\%. A Newton or multigrid solver, or a production code such as OpenFOAM or FEniCSx,
-would be faster again; we did not run one, so no measured comparison with those codes is claimed. The
-unsteady problems are more expensive still: the cylinder and the three-dimensional vortex were given a small
-fraction of their planned budgets and still dominate the GPU time of this study.
+\paragraph{Where a classical solver wins.} For a single forward solve the comparison is not close. Our simple
+finite-difference code produced the cavity reference on a CPU in ten minutes ($256^2$) to an hour ($512^2$), while
+the best network needed 1.6~GPU-hours and several configurations of the same method were 20--28\% wrong. A
+production finite-volume or finite-element solver would be faster still; we did not run one, so no measured
+comparison is claimed. On the unsteady benchmarks the networks did not reach the regime the gates refer to.
 
-\paragraph{What the ablation says about the components.} Components that change the \emph{representation}
-(Fourier features, the gated network, exact periodicity, exact divergence through a stream function) behaved
-as expected wherever they were compatible with the data. Components that change the \emph{objective} were
-problem dependent. Exact Dirichlet data are only as good as the data: the regularised lid is continuous but
-not compatible with continuity at the corners, and imposing it exactly caused the largest errors in this
-study. Gradient-norm balancing, which equalises the gradient contributions of the loss terms, is blind to this:
-it amplified a term that is easy to satisfy (the lid) and reduced the one that could not be satisfied, and in
-doing so recreated the incompatibility we had removed. The second-order L-BFGS stage, finally, is only as good
-as its fixed batch.
+\paragraph{What the failures have in common.} The largest errors of the study share one pattern: the network
+found a smooth function with small residuals everywhere that nevertheless violates a conservation law. Exact lid
+data incompatible with continuity left a divergence floor at the cavity corners; an impulsive inflow and, even after
+a ramp, a long channel let a velocity--pressure network lose most of the mass; and in three dimensions the energy
+left through the momentum residual instead of through viscosity. Pointwise residual losses do not control these
+integral quantities, and conservation checks (flow rate through cross-sections, the two dissipation estimates)
+diagnosed the failures faster than the residuals did. Exact divergence through a stream function restored most of
+the mass balance. Gradient-norm weighting amplified the problem in every case: it gives each loss term the same
+share of the update, so terms that are satisfied or easy received weights of $465$ (cavity lid),
+$2.4\times10^5$ (outflow) and $6\times10^9$ (initial $w$), while the hard terms were de-weighted. Terms with an
+identically zero target should at least be excluded from it.
 
-\paragraph{The reference data matter as much as the method.} Two of our gates turned out to depend on the
-reference more than on the network. The Ghia tables are an excellent 1982 multigrid solution, but at the
-2\% level their $v$ profile differs from grid-converged solutions of both the unit-lid and the
-regularised-lid problems. For the three-dimensional vortex no numeric reference curve was available with the
-workshop descriptions, and we had to digitise one from a figure. A benchmark gate should be stated against a
-reference whose own error is well below the gate, and the reference should solve the same problem (here: the
-same lid).
+\paragraph{References.} Two gates depended on the reference as much as on the network. The Ghia $v$ table is
+about 2\% from grid-converged solutions, so a 2\% gate on it cannot be met by an exact solution; and the
+three-dimensional reference had to be digitised from a figure. Gates should be stated against references that
+solve the same problem well beyond the required accuracy.
 
-\paragraph{Limitations.} All runs use one random seed, so no variance across seeds is reported. The budgets
-of the cylinder, three-dimensional, inverse, parametric and ablation runs are reduced (Table~\ref{tab:budget})
-to fit the available GPU time; results for those problems are therefore lower bounds on what the method can
-do with the planned budgets, and the cylinder ablation was not run at all. For most runs the GPU was shared with
-an unrelated workload, so absolute timings are pessimistic by a factor of about 1.3--1.5. The
-$64^4$ collocation grid suggested for the separable network did not fit in 16~GB, and the SOAP optimiser was
-not used. The three-dimensional reference is digitised from a published figure (about 1\% of full scale). The
-drag, lift and Strouhal reference intervals were taken from the FEATFLOW pages because the original benchmark
-paper could not be retrieved. No OpenFOAM or FEniCSx ground truth was generated; the cavity reference is our own
-finite-difference solution, validated by grid refinement and against the spectral value of the primary vortex.
+\paragraph{Limitations.} One seed per configuration; budgets of the cylinder, three-dimensional, inverse and
+parametric runs cut to between an eighth and a quarter of the plan, and the cylinder ablation not run; timings
+pessimistic by 1.3--1.5 for the runs made on a shared GPU; the $64^4$ separable grid did not fit in 16~GB; no
+second-order optimiser beyond L-BFGS; the three-dimensional reference digitised (about 1\% of full scale); no
+OpenFOAM or FEniCSx ground truth.
+
+\paragraph{Conclusion.} The representation-side components (Fourier features, gated networks, exact periodicity,
+stream functions) worked as intended where the data were compatible. The constraint- and weighting-side components
+need care: exact boundary data fail when the data are incompatible with the equations, and gradient-norm balancing
+can reinstate that failure through the weights. Two of six gates were passed (A and the inverse problem)
+\pending{DeepONet}. Code, reference solver, logs and evaluation files for every number in this paper are in the
+accompanying repository.
