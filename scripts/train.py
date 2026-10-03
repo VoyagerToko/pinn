@@ -101,6 +101,25 @@ def main():
             trainers[-1].lbfgs(int(cfg.training.lbfgs_steps))
         final = {f"window_{i:02d}/{k}": v for i, tr in enumerate(trainers) for k, v in tr.problem.evaluate(tr.state.params).items()}
 
+    elif args.benchmark == "deeponet_cavity" and cfg.problem.get("curriculum_Re_max", None):
+        # handbook 6.3 for the parametric model: widen the sampled Reynolds range stage by stage
+        problem = PROBLEMS[args.benchmark](cfg)
+        trainer = Trainer(problem, cfg, workdir, key, use_wandb=args.wandb)
+        Re_max_list = [float(r) for r in cfg.problem.curriculum_Re_max]
+        steps = list(cfg.problem.curriculum_steps)
+        if args.steps is not None:
+            tot = sum(steps)
+            steps = [max(1, int(round(args.steps * s / tot))) for s in steps]
+        for i, (Re_max, n) in enumerate(zip(Re_max_list, steps)):
+            problem.Re_range = (problem.Re_range[0], Re_max)
+            if i > 0:  # weights carried over, Adam and its warm-up/decay restarted
+                trainer.state = trainer.state.replace(opt_state=trainer.state.tx.init(trainer.state.params))
+            trainer.train(int(n), tag=f"Re in [{problem.Re_range[0]:g}, {Re_max:g}]", **log_kw)
+            trainer.save(f"Remax{int(Re_max)}.msgpack")
+        if cfg.training.lbfgs_steps:
+            trainer.lbfgs(int(cfg.training.lbfgs_steps))
+        final = problem.evaluate(trainer.state.params)
+
     else:
         problem = PROBLEMS[args.benchmark](cfg)
         trainer = Trainer(problem, cfg, workdir, key, use_wandb=args.wandb)

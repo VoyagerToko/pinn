@@ -15,10 +15,10 @@ kept under their own names; nothing is deleted.
 |---|---|---|---|---|
 | A Taylor-Green 2D | rel L2 < 1e-4 | tgv2d_G (2026-09-22) | velocity 4.05e-5 (u 4.17e-5, v 3.93e-5), pressure 2.59e-4 after per-time gauge alignment, max div 0 | **passed** |
 | B lid-driven cavity | Ghia u(0.5,y) and v(x,0.5) error < 2% at Re=1000 | cavity_F_r2 (row F) and cavity_C_r2 (row C), 2026-09-24 | F: u 19.8%, v 20.2%; C: u 0.63%, v 2.05% (0.27% from the N=512 FD solution of the same problem, which itself is 0.41% / 2.29% from Ghia, D2) | **failed** (F clearly, C by 0.05 points on v); diagnoses D1, D2; soft-lid F rerun queued |
-| C DFG 2D-2 cylinder | St within 3% of 0.30, Cd_max within 5% of 3.23 | - | - | pending |
+| C DFG 2D-2 cylinder | St within 3% of 0.30, Cd_max within 5% of 3.23 | cylinder_* (all reduced, stopped early) | no shedding in any run; best C_D max 1.54 (stream function, 2 windows); VP runs lose 52-98% of the mass along the channel | **failed** (D4-D6, D9) |
 | D Taylor-Green 3D (SPINN) | dissipation peak within 5% of the reference (0.01282 at t=9.0, digitised) | tgv3d_H (80k steps, reduced) | peak of -dE/dt 0.0292 at t=0 (127%); 2 nu zeta max 4.9e-4 (96%); no transition | **failed** (D7) |
-| inverse wake | lambda_1, lambda_2 recovered; hidden pressure | - | - | pending |
-| PI-DeepONet cavity | zero-shot error < 10% at Re=400 (Re in [300, 530] never sampled in training) | - | - | pending |
+| inverse wake | lambda_1, lambda_2 recovered; hidden pressure | cylinder_inverse (25k + 1k, reduced) | lambda_1 = 0.99997 (0.004%), lambda_2 = 0.010006 (0.065%); hidden pressure 2.44%; u 0.54%, v 2.69% (20 snapshots) | **passed** |
+| PI-DeepONet cavity | zero-shot error < 10% at Re=400 (Re in [300, 530] never sampled in training) | deeponet_cavity (25k, reduced) | velocity vs FD at Re=400: 81% (Re=100 70%, Re=1000 87%) | **failed** (D8); curriculum rerun deeponet_cavity_curr running |
 
 ## Run log
 
@@ -39,6 +39,12 @@ already in use on the card before the run (the Windows desktop holds ~2.1 GB).
 | 2026-09-24 | cavity_F_softlid | row F with `problem.lid_bc="soft"`, 200k Adam; L-BFGS interrupted (all jobs stopped on request), evaluated from the end-of-Adam checkpoint on 2026-09-27 | Re=1000: Ghia u 16.0%, v 15.6%, velocity vs FD 21.0%; Re=400: 10.0% / 11.7%; Re=100: 1.6% / 7.1%. Grad-norm drove w/u_lid to ~465 and w/r_c to 0.21: the soft lid became effectively hard again and continuity stayed at 2e-2..1e-1 | ~2.3 h Adam | 0.023 s | 1.59 GB |
 | 2026-09-27 | cavity_D_softlid | row D (fixed weights) with the soft lid, 200k Adam + 20k L-BFGS; GPU shared with the KalaVision services | **end of Adam (Re1000.msgpack): Ghia u 1.04%, v 2.20%, velocity vs FD 1.9%**; after L-BFGS: u 4.96%, v 6.37%, FD 6.7% (L-BFGS loss 2.6e-3 -> 2.3e-6 on its fixed batch, D3); Re=400: 1.6% / 4.6% (FD 3.1%); Re=100: 0.7% / 2.1% (FD 4.8%) | 11761 s | 0.035 s (shared GPU) | 1.59 GB |
 | 2026-09-27 | tgv3d_H | row H (SPINN, vector potential, 32^4 grid), 80k Adam + 1k L-BFGS (reduced from 300k + 20k); GPU shared until 19:24 UTC | **gate failed**: E_k(0) = 0.1246 (exact 0.125); -dE_k/dt peaks at t = 0 with 0.0292 (reference 0.01282 at t = 9.0, error 127%); 2 nu zeta never exceeds 4.9e-4 (error 96%); curve rel. L2 vs reference 1.52; spectrum slope k=4..16 -3.96 at t=0 and -3.50 at t=9 (`eval_spectrum_t9.json`; -5/3 expected), E_k(9) = 0.022 | 4458 s | 0.037 s | 3.07 GB |
+| 2026-09-27 | cylinder_inverse | inverse wake, stream function, 25k Adam + 1k L-BFGS (reduced from 100k + 20k) | lambda_1 0.99997 (err 0.0035%), lambda_2 0.010006 (err 0.065%), hidden p 2.44%, u 0.54%, v 2.69% | 1868 s | 0.055 s | 1.63 GB |
+| 2026-09-27 | deeponet_cavity | PI-DeepONet, soft lid, fixed weights, 25k Adam + 1k L-BFGS, Re log-uniform in [100,1000] minus [300,530] from step 0 | velocity vs FD: Re=100 70%, Re=400 81%, Re=1000 87%; after 5k steps it was at 10.5% (Re=100) before the loss spiked (D8) | 555 s | 0.013 s | 1.70 GB |
+| 2026-09-27 | cavity_abl_{A,B,C,D,F,G} | ablation rows at 16k curriculum steps (1.6k/3.2k/11.2k), Adam only, rows D-G soft lid | velocity vs FD at Re=1000: A 91%, B 90%, C 81%, D 114%, F 118%, G 113%: none converged; 1.6k steps at Re=100 is too short before the jump to Re=400 (D9) | 255-587 s | 0.012-0.023 s | 0.3-0.6 GB |
+| 2026-09-27 | tgv2d_abl_{A..G} | ablation rows at 3k Adam steps, warm-up 1k, no L-BFGS | velocity rel L2: A 8.7e-3, B 2.25e-2, C 3.2e-2, D 2.18e-2, E 1.80e-2, F 1.71e-2, G 1.17e-2; max div 1.4e-2/6.4e-2/7.7e-2 for A/B/C (VP), 0 for D-G (stream function) | 113-659 s | 0.014 (A) - 0.121 (G) s | 0.3-2.0 GB |
+| 2026-09-28 | cylinder_sf_2x6k | stream function (div u = 0 exactly), soft Dirichlet data, row E (fixed weights, causal), inflow ramp, 2 windows x 6k, 8,192 residual points | flow-rate ratio at the end of window 1: 0.77 / 0.77 / 0.75 at x = 0.6 / 1.2 / 2.2 (VP: 0.12 / 0.04 / 0.02); C_D 0.87-1.54; no shedding | 3753 s | 0.359 s | 1.87 GB |
+| 2026-09-27 | tgv3d_H movie | scripts/visualize.py, 96^3, 240 frames, grid-mode fields | runs/tgv3d_H/tgv3d.mp4 (3.3 MB) | ~6 min | - | - |
 | 2026-09-24 | tgv2d_G (re-evaluated) | cost numbers for the 2026-09-22 run | unchanged errors; inference 3.9e6 points/s (stream function, 65k batch) | - | 0.139 s | - |
 | 2026-09-24 | probes (300-2100 steps, `runs/_probe_*`) | step time / memory before the long runs | tgv3d SPINN 32^4: 0.044 s/step, 3.1 GB, ~5 min compile; **64^4: out of memory** (one 11.1 GB buffer; the card has ~13.9 GB free); cylinder row G: 0.089 s/step with remat, 0.55 GB, plus ~10% for the grad-norm/RAD/causal updates every 1000 steps | - | - | - |
 
@@ -159,6 +165,21 @@ never 100 (min weight 0.8-0.92). This is the same weighting pathology as the cav
 cylinder outflow (w ~ 2.4e5, D5): terms whose gradient is tiny receive enormous weights. A fix would at least put
 terms with an identically-zero target (ic_w) into `weighting.fixed_terms`, but reaching the Re = 1600 transition is
 not plausible at this budget; not rerun within the 12-hour window. The STEP 9 movie is rendered from this model.
+
+**D8 (2026-10-03) - PI-DeepONet without a Reynolds curriculum is unstable.** deeponet_cavity sampled Re up to 1000
+from the first step. Its error against the FD field at Re=100 was 10.5% after 5k steps, then the loss spiked
+(continuity 2.6 at 10k) and the run ended at 70-87%. Handbook 6.3 forbids starting the cavity at Re=1000; the
+parametric model needs the same. Fix: `problem.curriculum_Re_max = (200, 500, 1000)` widens the sampled range
+stage by stage (40k/40k/120k steps, Adam restarted per stage, hold-out band kept; the sampler now clips the band to
+the stage range). Rerun as deeponet_cavity_curr (200k Adam, soft lid, fixed weights, no L-BFGS after D3).
+
+**D9 (2026-10-03) - short cavity ablation is uninformative; cylinder with exact divergence.** At 16k curriculum
+steps every cavity row ends 81-118% from the FD field: 1.6k steps at Re=100 is too short before the jump to Re=400,
+and all rows collapse there. The ablation of Benchmark B is therefore taken at the full budget (200k Adam steps,
+compared at the end of Adam): C, D, F (hard lid) and D, F (soft lid) exist; A, B and G (soft lid) are queued.
+The stream-function cylinder (exact div u = 0, soft Dirichlet data) raises the flow-rate ratio from 0.02-0.12 to
+0.75-0.77 and C_D max from 0.10 to 1.54 in two windows; the remaining 23-25% loss is leakage through the soft
+wall and inflow conditions (psi not exactly constant on the walls). Shedding and the C gate remain far away.
 
 **Plan change (2026-09-27, requested): finish everything within 12 hours.** The specified budgets (cylinder 16 x 200k
 steps, SPINN 300k, full ablation on A-C) need ~150-160 GPU hours. On request the remaining runs use reduced

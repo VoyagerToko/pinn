@@ -70,8 +70,10 @@ class ParametricCavityDeepONet(Problem):
             Re = 10 ** jax.random.uniform(k1, (self.n_Re,), minval=lo, maxval=hi)
         else:
             # log-uniform on [lo, hi] minus the held-out band: draw on the shortened interval, then
-            # shift the part above the band's lower edge past the band
-            b0, b1 = np.log10(self.holdout[0]), np.log10(self.holdout[1])
+            # shift the part above the band's lower edge past the band (band clipped to [lo, hi], so a
+            # curriculum stage whose range ends below or inside the band is handled too)
+            b0 = min(max(np.log10(self.holdout[0]), lo), hi)
+            b1 = min(max(np.log10(self.holdout[1]), lo), hi)
             s = jax.random.uniform(k1, (self.n_Re,), minval=lo, maxval=hi - (b1 - b0))
             Re = 10 ** jnp.where(s < b0, s, s + (b1 - b0))
         k2, k3 = jax.random.split(k2)

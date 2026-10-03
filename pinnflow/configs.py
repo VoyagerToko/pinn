@@ -180,6 +180,8 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         p.holdout_Re_band = (300.0, 530.0)  # never sampled in training: Re = 400 is a zero-shot query
         p.zero_shot_Re = 400
         p.lid_bc = "hard"  # as for the cavity: "soft" leaves u on the lid as a loss term
+        p.curriculum_Re_max = None  # e.g. (200, 500, 1000): widen the sampled Re range stage by stage (handbook 6.3)
+        p.curriculum_steps = (40000, 40000, 120000)
         c.arch = ml_collections.ConfigDict(
             {
                 "arch_name": "DeepONet",
