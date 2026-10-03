@@ -18,7 +18,7 @@ kept under their own names; nothing is deleted.
 | C DFG 2D-2 cylinder | St within 3% of 0.30, Cd_max within 5% of 3.23 | cylinder_* (all reduced, stopped early) | no shedding in any run; best C_D max 1.54 (stream function, 2 windows); VP runs lose 52-98% of the mass along the channel | **failed** (D4-D6, D9) |
 | D Taylor-Green 3D (SPINN) | dissipation peak within 5% of the reference (0.01282 at t=9.0, digitised) | tgv3d_H (80k steps, reduced) | peak of -dE/dt 0.0292 at t=0 (127%); 2 nu zeta max 4.9e-4 (96%); no transition | **failed** (D7) |
 | inverse wake | lambda_1, lambda_2 recovered; hidden pressure | cylinder_inverse (25k + 1k, reduced) | lambda_1 = 0.99997 (0.004%), lambda_2 = 0.010006 (0.065%); hidden pressure 2.44%; u 0.54%, v 2.69% (20 snapshots) | **passed** |
-| PI-DeepONet cavity | zero-shot error < 10% at Re=400 (Re in [300, 530] never sampled in training) | deeponet_cavity (25k, reduced) | velocity vs FD at Re=400: 81% (Re=100 70%, Re=1000 87%) | **failed** (D8); curriculum rerun deeponet_cavity_curr running |
+| PI-DeepONet cavity | zero-shot error < 10% at Re=400 (Re in [300, 530] never sampled in training) | deeponet_cavity_curr2 + 3 continuations (600k Adam steps in total, lr 3e-4 with clipping; planned 200k + 20k) | velocity vs FD at Re=400: **10.11%** (14.0% after the curriculum, 11.1%, 10.27%, then a 9.82-10.11% plateau); Re=100 2.2%, Re=1000 30.6% | **failed** by 0.11 points (D8, D10, D11) |
 
 ## Run log
 
@@ -49,6 +49,7 @@ already in use on the card before the run (the Windows desktop holds ~2.1 GB).
 | 2026-10-03 | deeponet_cavity_curr_unstable | same with peak lr 1e-3, stopped at ~30k steps | diverged in the first stage (D10) | 0.19 h | 0.021 s | - |
 | 2026-10-03 | deeponet_cavity_cont | warm start from deeponet_cavity_curr2, full Re range (hold-out kept), 150k Adam, peak lr 3e-4 (warm-up 5k, x0.9 per 2k), clipping 1.0 | velocity vs FD: Re=100 1.99%, **Re=400 (unseen) 11.1%** (Ghia u 9.3%, v 13.4%), Re=1000 33.5%; flat from 105k steps on, where the lr had decayed below 1e-6; warm-up restart cost ~30k steps (31% at 15k) | 2379 s | 0.013 s | 0.34 GB |
 | 2026-10-03 | deeponet_cavity_cont2 | warm start from deeponet_cavity_cont, 150k Adam, peak lr 2e-4, warm-up 2k, x0.9 per 6k, clipping 1.0 (a first attempt was killed at ~5k steps by an external WSL restart: `deeponet_cavity_cont2_killed`) | velocity vs FD: Re=100 2.31%, **Re=400 (unseen) 10.27%** (Ghia u 8.4%, v 12.3%), Re=1000 31.0%; still falling at the end (10.53% at 140k) | 2354 s | 0.013 s | 0.34 GB |
+| 2026-10-03 | deeponet_cavity_cont3 | warm start from deeponet_cavity_cont2, 100k Adam at constant lr 1.5e-5 (no warm-up), clipping 1.0 | velocity vs FD: Re=100 2.21%, **Re=400 (unseen) 10.11%** (Ghia u 8.1%, v 12.5%), Re=1000 30.6%; plateau 9.82-10.11% over the last 60k steps (9.82% at 40k); gate (<10%) missed by 0.11 points | 1558 s | 0.013 s | 0.34 GB |
 | 2026-09-24 | tgv2d_G (re-evaluated) | cost numbers for the 2026-09-22 run | unchanged errors; inference 3.9e6 points/s (stream function, 65k batch) | - | 0.139 s | - |
 | 2026-09-24 | probes (300-2100 steps, `runs/_probe_*`) | step time / memory before the long runs | tgv3d SPINN 32^4: 0.044 s/step, 3.1 GB, ~5 min compile; **64^4: out of memory** (one 11.1 GB buffer; the card has ~13.9 GB free); cylinder row G: 0.089 s/step with remat, 0.55 GB, plus ~10% for the grad-norm/RAD/causal updates every 1000 steps | - | - | - |
 
@@ -197,6 +198,13 @@ the learning rate to ~5e-7. A second continuation (deeponet_cavity_cont2, 150k) 
 steps, peak 2e-4, warm-up 2k) so that the rate stays useful to the end. This is extra budget beyond the planned
 200k + 20k (now 350k + 150k Adam steps in total), reported as such. Note: WSL was restarted externally at 08:34:45 UTC,
 killing cavity_G_softlid one minute into its compile; it was requeued.
+
+**Totals (2026-10-03).** GPU time of the whole study: 30.0 h (`scripts/gpu_hours.py`: job logs plus the three runs
+before the job wrapper). Tests: 57/57 pass (`pytest`, CPU, 2026-10-03). Gates: A passed, inverse passed; B failed
+(row C 0.63% / 2.05%, an exact solution of the regularised problem gives 0.41% / 2.29%); C failed (no shedding);
+D failed (no transition); PI-DeepONet failed by 0.11 points (10.11% at the unseen Re = 400). External WSL restarts on
+2026-10-03 (08:34, ~08:41, 09:51 UTC) killed cavity_G_softlid (requeued, then dropped for time) and the first
+deeponet_cavity_cont2 attempt.
 
 **Plan change (2026-09-27, requested): finish everything within 12 hours.** The specified budgets (cylinder 16 x 200k
 steps, SPINN 300k, full ablation on A-C) need ~150-160 GPU hours. On request the remaining runs use reduced
