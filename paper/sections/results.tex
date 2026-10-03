@@ -102,24 +102,21 @@ needed one 11~GB buffer and did not fit, so this run used $32^4$ points and a qu
 \subsection{Inverse problem and parametric model}
 From 5000 velocity samples the wake network recovered $\lambda_1=0.99997$ and $\lambda_2=0.010006$ (errors 0.004\%
 and 0.065\%) and the pressure, never observed, to 2.44\% (velocity 0.54\% and 2.69\%) on 20 snapshots, with a
-quarter of the planned budget. The DeepONet first diverged twice: sampling $\Rey$ up to 1000 from the start, and
-again with the curriculum, in both cases as soon as the warm-up reached the peak rate of $10^{-3}$ (10.5\% and
-7.8\% at $\Rey=100$ after 5k steps, after which both diverged; the first ended at 70--87\%). At $3\times10^{-4}$ with
-clipping, training was stable: after the 200k-step curriculum the error against the FD field was 2.3\% at $\Rey=100$,
-14.0\% at the unseen $\Rey=400$ and 40\% at $\Rey=1000$; a 150k-step continuation over the full range brought these
-to 2.0\%, 11.1\% and 33.5\%, at which
-point the decayed learning rate stopped further progress. Two more legs, with a slower decay and then at a
-constant rate of $1.5\times10^{-5}$, reached 10.27\% and then a plateau between 9.82\% and 10.11\%. The final model
-is 10.11\% from the FD field at the unseen $\Rey=400$ (2.2\% at 100, 30.6\% at 1000) after 600k steps, three times
-the planned budget: the gate is missed by 0.11 points. The high end of the range is the weak part of the model, as
-for the single-$\Rey$ cavity, which needed 140k steps at $\Rey=1000$ alone. Once trained, a new $\Rey$ costs one
-forward pass (about $10^7$ points per second).
+quarter of the planned budget. The DeepONet diverged twice, both times when the warm-up reached a peak rate of
+$10^{-3}$ (once even within the curriculum's first stage). At $3\times10^{-4}$ with clipping it trained stably: 14.0\%
+from the FD field at the unseen $\Rey=400$ after the 200k-step curriculum, then 11.1\%, 10.27\% and a plateau near
+10\% in continuations whose learning rate had decayed. Doubling the Reynolds samples and points per step (8 and
+8192) at $10^{-5}$ brought the error to 9.55--9.74\% for the last 50k steps. The final model is 9.65\% from the FD
+field at $\Rey=400$ (2.1\% at 100, 30.0\% at 1000) and passes the gate after 660k steps, three times the planned
+budget; as for the single-$\Rey$ cavity, the high end of the range is the weak part. A new $\Rey$ then costs one
+forward pass.
 
 \subsection{Cost}
 \begin{table}[t]
 \centering
 \caption{Cost: training wall-clock, Adam step time, peak memory of the training process and inference
-throughput (batches of 65,536 points). $^*$GPU shared with another workload.}
+throughput (batches of 65,536 points). $^*$GPU shared with another workload. $^{\ddagger}$0.025~s in the last
+leg, with a four times larger batch.}
 \label{tab:cost}
 \footnotesize
 \setlength{\tabcolsep}{2.5pt}
@@ -133,7 +130,7 @@ B, row D soft lid$^*$ & 3.3 h & 0.035 & 1.6 GB & $8.9\times10^6$\\
 C, stream function & 1.0 h & 0.359 & 1.9 GB & $3.9\times10^6$\\
 D, row H, grid queries & 1.2 h & 0.037 & 3.1 GB & $2.0\times10^8$\\
 inverse & 0.5 h & 0.055 & 1.6 GB & $4.2\times10^6$\\
-PI-DeepONet (600k) & 2.6 h & 0.013 & 0.34 GB & $9.9\times10^6$\\
+PI-DeepONet & 3.1 h & 0.013$^{\ddagger}$ & 0.34 GB & $1.1\times10^7$\\
 \midrule
 FD $256^2$ / $512^2$, CPU & 10 / 57 min & & & \\
 \bottomrule
@@ -142,4 +139,4 @@ FD $256^2$ / $512^2$, CPU & 10 / 57 min & & & \\
 Table~\ref{tab:cost} lists the cost of the main runs. A trained network answers $3.9\times10^6$ to
 $1.2\times10^7$ point queries per second, and the separable network $2\times10^8$ on a grid. Training is expensive: the best cavity network took
 1.6~GPU-hours, while our deliberately simple finite-difference code reached a comparable accuracy on the CPU in ten
-minutes. All runs of this study together, including the failed and interrupted ones, used 30.0 GPU hours.
+minutes. All runs of this study together, including the failed and interrupted ones, used 30.5 GPU hours.
