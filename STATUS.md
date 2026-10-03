@@ -47,6 +47,7 @@ already in use on the card before the run (the Windows desktop holds ~2.1 GB).
 | 2026-09-27 | tgv3d_H movie | scripts/visualize.py, 96^3, 240 frames, grid-mode fields | runs/tgv3d_H/tgv3d.mp4 (3.3 MB) | ~6 min | - | - |
 | 2026-10-03 | deeponet_cavity_curr2 | PI-DeepONet, soft lid, fixed weights, Re curriculum (Re_max 200/500/1000, 40k/40k/120k), peak lr 3e-4, gradient clipping 1.0, no L-BFGS | stable; velocity vs FD: Re=100 2.35%, **Re=400 (unseen) 14.0%** (Ghia u 11.3%, v 17.6%), Re=1000 40.5%; gate (<10%) missed; continued as deeponet_cavity_cont | 3068 s | 0.013 s | 0.34 GB |
 | 2026-10-03 | deeponet_cavity_curr_unstable | same with peak lr 1e-3, stopped at ~30k steps | diverged in the first stage (D10) | 0.19 h | 0.021 s | - |
+| 2026-10-03 | deeponet_cavity_cont | warm start from deeponet_cavity_curr2, full Re range (hold-out kept), 150k Adam, peak lr 3e-4 (warm-up 5k, x0.9 per 2k), clipping 1.0 | velocity vs FD: Re=100 1.99%, **Re=400 (unseen) 11.1%** (Ghia u 9.3%, v 13.4%), Re=1000 33.5%; flat from 105k steps on, where the lr had decayed below 1e-6; warm-up restart cost ~30k steps (31% at 15k) | 2379 s | 0.013 s | 0.34 GB |
 | 2026-09-24 | tgv2d_G (re-evaluated) | cost numbers for the 2026-09-22 run | unchanged errors; inference 3.9e6 points/s (stream function, 65k batch) | - | 0.139 s | - |
 | 2026-09-24 | probes (300-2100 steps, `runs/_probe_*`) | step time / memory before the long runs | tgv3d SPINN 32^4: 0.044 s/step, 3.1 GB, ~5 min compile; **64^4: out of memory** (one 11.1 GB buffer; the card has ~13.9 GB free); cylinder row G: 0.089 s/step with remat, 0.55 GB, plus ~10% for the grad-norm/RAD/causal updates every 1000 steps | - | - | - |
 
@@ -188,6 +189,13 @@ wall and inflow conditions (psi not exactly constant on the walls). Shedding and
 steps and then diverged (loss 9.9 at 10k, 13.6 at 20k): the blow-up starts when the warm-up reaches the peak rate
 1e-3, inside the easiest stage. Stopped at ~30k steps (`runs/deeponet_cavity_curr_unstable`). Rerun
 deeponet_cavity_curr2 with peak lr 3e-4 and global gradient-norm clipping at 1.0 (`optim.clip_grad_norm`).
+
+**D11 (2026-10-03) - PI-DeepONet budget.** The curriculum run (200k) ended at 14.0% at the unseen Re = 400 and the first
+continuation (150k, same schedule) at 11.1%, flat over its last 45k steps because the exponential decay had brought
+the learning rate to ~5e-7. A second continuation (deeponet_cavity_cont2, 150k) uses a slower decay (x0.9 every 6k
+steps, peak 2e-4, warm-up 2k) so that the rate stays useful to the end. This is extra budget beyond the planned
+200k + 20k (now 350k + 150k Adam steps in total), reported as such. Note: WSL was restarted externally at 08:34:45 UTC,
+killing cavity_G_softlid one minute into its compile; it was requeued.
 
 **Plan change (2026-09-27, requested): finish everything within 12 hours.** The specified budgets (cylinder 16 x 200k
 steps, SPINN 300k, full ablation on A-C) need ~150-160 GPU hours. On request the remaining runs use reduced
