@@ -16,8 +16,8 @@ the steady cavity.}
 \cmidrule(lr){2-3}\cmidrule(lr){4-6}
 row & error & max div & Ghia $u$ & Ghia $v$ & vs FD\\
 \midrule
-A & $8.7\times10^{-3}$ & $1.4\times10^{-2}$ & \pending{} & \pending{} & \pending{}\\
-B & $2.3\times10^{-2}$ & $6.4\times10^{-2}$ & \pending{} & \pending{} & \pending{}\\
+A & $8.7\times10^{-3}$ & $1.4\times10^{-2}$ & \multicolumn{3}{c}{not run at 200k$^{\dagger}$}\\
+B & $2.3\times10^{-2}$ & $6.4\times10^{-2}$ & \multicolumn{3}{c}{not run at 200k$^{\dagger}$}\\
 C & $3.2\times10^{-2}$ & $7.7\times10^{-2}$ & 0.65\% & 2.06\% & 0.25\%\\
 D exact lid & $2.2\times10^{-2}$ & 0 & 21.3\% & 20.0\% & 28.3\%\\
 D soft lid & & & 1.04\% & 2.20\% & 1.9\%\\
@@ -28,6 +28,8 @@ G soft lid & $1.2\times10^{-2}$ & 0 & \pending{} & \pending{} & \pending{}\\
 \midrule
 FD, same lid & & & 0.41\% & 2.29\% & --\\
 \bottomrule
+\multicolumn{6}{@{}p{0.97\columnwidth}@{}}{\footnotesize $^{\dagger}$Only run with 16k curriculum steps, a budget at
+which every row failed (vs FD: A 91\%, B 90\%, C 81\%, D 114\%, F 118\%, G 113\%).}
 \end{tabular}
 \end{table}
 
