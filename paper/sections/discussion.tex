@@ -9,11 +9,10 @@ at a cost of half a GPU-hour. The trained networks are continuous, differentiabl
 at millions of points per second and sampled at any resolution; the drag integrals, divergence maps and the
 vortex-tube animation of this study use exactly that.
 
-\paragraph{Where a classical solver wins.} For a single forward solve the comparison is not close. Our simple
-finite-difference code produced the cavity reference on a CPU in ten minutes ($256^2$) to an hour ($512^2$), while
-the best network needed 1.6~GPU-hours and several configurations of the same method were 20--28\% wrong. A
-production finite-volume or finite-element solver would be faster still; we did not run one, so no measured
-comparison is claimed. On the unsteady benchmarks the networks did not reach the regime the gates refer to.
+\paragraph{Where a classical solver wins.} For a single forward solve the comparison is not close: our simple
+finite-difference code produced the cavity reference on a CPU in ten minutes to an hour, while the best network
+needed 1.6~GPU-hours and other configurations were 20--28\% wrong. We did not run a production solver, so no
+measured comparison with one is claimed.
 
 \paragraph{What the failures have in common.} The largest errors of the study share one pattern: the network
 found a smooth function with small residuals everywhere that nevertheless violates a conservation law. Exact lid
@@ -27,20 +26,17 @@ share of the update, so terms that are satisfied or easy received weights of $46
 $2.4\times10^5$ (outflow) and $6\times10^9$ (initial $w$), while the hard terms were de-weighted. Terms with an
 identically zero target should at least be excluded from it.
 
-\paragraph{References.} Two gates depended on the reference as much as on the network. The Ghia $v$ table is
-about 2\% from grid-converged solutions, so a 2\% gate on it cannot be met by an exact solution; and the
-three-dimensional reference had to be digitised from a figure. Gates should be stated against references that
-solve the same problem well beyond the required accuracy.
-
-\paragraph{Limitations.} One seed per configuration; budgets of the cylinder, three-dimensional, inverse and
-parametric runs cut to between an eighth and a quarter of the plan, and the cylinder ablation not run; timings
-pessimistic by 1.3--1.5 for the runs made on a shared GPU; the $64^4$ separable grid did not fit in 16~GB; no
-second-order optimiser beyond L-BFGS; the three-dimensional reference digitised (about 1\% of full scale); no
-OpenFOAM or FEniCSx ground truth.
+\paragraph{References and limitations.} The Ghia $v$ table is about 2\% from grid-converged solutions, so a 2\%
+gate on it cannot be met even by an exact solution: gates should be stated against references that solve the same
+problem well beyond the required accuracy. Limitations: one seed per configuration; reduced budgets for the
+cylinder, three-dimensional and inverse runs, and no cylinder ablation; timings 1.3--1.5 times pessimistic for runs
+on a shared GPU; no $64^4$ separable grid (16~GB); a digitised three-dimensional reference; no OpenFOAM or FEniCSx
+ground truth.
 
 \paragraph{Conclusion.} The representation-side components (Fourier features, gated networks, exact periodicity,
 stream functions) worked as intended where the data were compatible. The constraint- and weighting-side components
 need care: exact boundary data fail when the data are incompatible with the equations, and gradient-norm balancing
-can reinstate that failure through the weights. Two of six gates were passed (A and the inverse problem)
-\pending{DeepONet}. Code, reference solver, logs and evaluation files for every number in this paper are in the
-accompanying repository.
+can reinstate that failure through the weights. Two of six gates were passed (A and the inverse problem) and the
+parametric model missed its gate by 0.11 points; the cavity gate cannot be met by any exact solution, and the
+cylinder and three-dimensional gates are out of reach of these budgets. Code, reference solver, logs and evaluation
+files for every number in this paper are in the accompanying repository.

@@ -11,14 +11,10 @@ sparse data~\cite{raissi2020hfm} and surrogates queried at arbitrary points.
 The optimisation behind this is often badly conditioned. Networks resolve smooth components first, the loss
 terms have gradients of very different size, unsteady solutions can be learnt out of temporal order, and
 convection-dominated problems collapse onto trivial
-states~\cite{wang2021gradient,wang2022ntk,krishnapriyan2021failure}. Proposed remedies include Fourier
-features~\cite{tancik2020fourier}, gated networks and gradient-based loss balancing~\cite{wang2021gradient},
-kernel-based weights~\cite{wang2022ntk}, causal weighting~\cite{wang2024causality}, adaptive
-sampling~\cite{wu2023rad}, weight factorisation~\cite{wang2022rwf}, residual architectures~\cite{wang2024piratenets},
-divergence-free outputs~\cite{jin2021nsfnets}, exact boundary constraints~\cite{lagaris1998,sukumar2022distance},
-separable networks~\cite{cho2023spinn}, domain decomposition~\cite{jagtap2020xpinn} and operator
-learning~\cite{lu2021deeponet,wang2021pideeponet,li2021fno}; practical advice is collected
-in~\cite{wang2023expert}. Each remedy is usually shown on the problem that motivated it.
+states~\cite{wang2021gradient,wang2022ntk,krishnapriyan2021failure}. Many remedies have been
+proposed~\cite{tancik2020fourier,wang2022ntk,wang2024causality,wu2023rad,wang2022rwf,wang2024piratenets,jin2021nsfnets,
+lagaris1998,sukumar2022distance,cho2023spinn,jagtap2020xpinn,lu2021deeponet,wang2021pideeponet,li2021fno} and
+collected into practical advice~\cite{wang2023expert}, usually each shown on the problem that motivated it.
 
 We test the combination in one code base, built in JAX~\cite{jax2018github} along the lines of
 JAX-PI~\cite{jaxpi} and SPINN~\cite{spinncode}, on a ladder of problems with gates fixed before training: the

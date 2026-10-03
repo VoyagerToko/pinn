@@ -35,9 +35,8 @@ which every row failed (vs FD: A 91\%, B 90\%, C 81\%, D 114\%, F 118\%, G 113\%
 
 \subsection{A: two-dimensional Taylor--Green vortex}
 The full configuration (row G, stream function, 50k Adam steps) reaches a velocity error of $4.05\times10^{-5}$
-and a pressure error of $2.59\times10^{-4}$ with zero divergence, passing the gate by a factor of 2.5. Comparing
-pressure with a single constant over the whole space--time domain instead of per time slice would have reported
-$3.3\times10^{-2}$ for the same model, which shows how much of a pressure error can be gauge. In the short
+and a pressure error of $2.59\times10^{-4}$ with zero divergence, passing the gate by a factor of 2.5 (with one
+gauge constant for the whole space--time domain the same model would show $3.3\times10^{-2}$). In the short
 ablation (Table~\ref{tab:ablation}) the rows end between 0.9\% and 3.2\%; at 3k steps the plain network (A) is
 the most accurate, among the others the error falls steadily from C to G, and the stream-function rows (D--G) are
 divergence free by construction while the VP rows keep $|\nabla\cdot u|$ of $10^{-2}$--$10^{-1}$.
@@ -109,8 +108,12 @@ again with the curriculum, in both cases as soon as the warm-up reached the peak
 clipping, training was stable: after the 200k-step curriculum the error against the FD field was 2.3\% at $\Rey=100$,
 14.0\% at the unseen $\Rey=400$ and 40\% at $\Rey=1000$; a 150k-step continuation over the full range brought these
 to 2.0\%, 11.1\% and 33.5\%, at which
-point the decayed learning rate stopped further progress. \pending{cont2: errors and gate.} The high end of the
-range is the weak part of the model, as for the single-$\Rey$ cavity, which needed 140k steps at $\Rey=1000$ alone.
+point the decayed learning rate stopped further progress. Two more legs, with a slower decay and then at a
+constant rate of $1.5\times10^{-5}$, reached 10.27\% and then a plateau between 9.82\% and 10.11\%. The final model
+is 10.11\% from the FD field at the unseen $\Rey=400$ (2.2\% at 100, 30.6\% at 1000) after 600k steps, three times
+the planned budget: the gate is missed by 0.11 points. The high end of the range is the weak part of the model, as
+for the single-$\Rey$ cavity, which needed 140k steps at $\Rey=1000$ alone. Once trained, a new $\Rey$ costs one
+forward pass (about $10^7$ points per second).
 
 \subsection{Cost}
 \begin{table}[t]
@@ -130,7 +133,7 @@ B, row D soft lid$^*$ & 3.3 h & 0.035 & 1.6 GB & $8.9\times10^6$\\
 C, stream function & 1.0 h & 0.359 & 1.9 GB & $3.9\times10^6$\\
 D, row H, grid queries & 1.2 h & 0.037 & 3.1 GB & $2.0\times10^8$\\
 inverse & 0.5 h & 0.055 & 1.6 GB & $4.2\times10^6$\\
-PI-DeepONet & \pending{} & \pending{} & \pending{} & \pending{}\\
+PI-DeepONet (600k) & 2.6 h & 0.013 & 0.34 GB & $9.9\times10^6$\\
 \midrule
 FD $256^2$ / $512^2$, CPU & 10 / 57 min & & & \\
 \bottomrule
@@ -139,4 +142,4 @@ FD $256^2$ / $512^2$, CPU & 10 / 57 min & & & \\
 Table~\ref{tab:cost} lists the cost of the main runs. A trained network answers $3.9\times10^6$ to
 $1.2\times10^7$ point queries per second, and the separable network $2\times10^8$ on a grid. Training is expensive: the best cavity network took
 1.6~GPU-hours, while our deliberately simple finite-difference code reached a comparable accuracy on the CPU in ten
-minutes. All runs of this study together used \pending{N} GPU hours.
+minutes. All runs of this study together, including the failed and interrupted ones, used 30.0 GPU hours.

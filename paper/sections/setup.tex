@@ -16,7 +16,7 @@ B: cavity, $\Rey=1000$ & Ghia $u$ and $v$ errors $<2\%$ & 200k + 20k & row C: 0.
 C: DFG 2D-2 cylinder & $St$ within 3\% of 0.30, $C_{D,\max}$ within 5\% of 3.23 & 1--2 windows of 4k--12k ($16\times200$k) & no vortex shedding; $C_{D,\max}\le1.54$ & failed\\
 D: Taylor--Green 3D, $\Rey=1600$ & dissipation peak within 5\% of 0.01282 & 80k + 1k (300k + 20k) & $-\dd E_k/\dd t$: 0.0292 at $t=0$; $2\nu\zeta\le4.9\times10^{-4}$ & failed\\
 inverse wake, $\Rey=100$ & recover $\lambda_1=1$, $\lambda_2=0.01$ & 25k + 1k (100k + 20k) & errors 0.004\% and 0.065\%; hidden pressure 2.44\% & passed\\
-PI-DeepONet cavity & error $<10\%$ at unseen $\Rey=400$ & 200k (200k + 20k) & \pending{} & \pending{}\\
+PI-DeepONet cavity & error $<10\%$ at unseen $\Rey=400$ & 600k (200k + 20k) & 10.11\% at $\Rey=400$; 2.2\% at 100, 30.6\% at 1000 & failed\\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -44,8 +44,8 @@ report $-0.11793$. The $512^2$ regularised-lid field is our reference at $\Rey=1
 diameter) follow~\cite{schaefer1996}; the outlet carries the do-nothing condition as a loss. Drag and lift come
 from the surface tractions on 256 points with wall gradients from automatic differentiation; $St$ from the
 dominant frequency of $C_L(t)$. The 1996 report was not retrievable, so the reference intervals and the drag and
-lift series come from the FEATFLOW pages~\cite{featflow}; that series gives $St=0.3002$ and $C_{D,\max}=3.2201$.
-The value $St\approx0.165$ often quoted for $\Rey=100$ is for an unconfined cylinder.
+lift series come from the FEATFLOW pages~\cite{featflow}; that series gives $St=0.3002$ and $C_{D,\max}=3.2201$
+(the often quoted $St\approx0.165$ holds for an unconfined cylinder).
 
 \paragraph{D: Taylor--Green vortex at $\Rey=1600$.} The triply periodic vortex~\cite{brachet1983} becomes
 turbulent near $t=8$--9. We compute $E_k$ and enstrophy $\zeta$ on $32^3$ grids, the dissipation as
