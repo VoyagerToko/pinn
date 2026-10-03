@@ -181,6 +181,12 @@ The stream-function cylinder (exact div u = 0, soft Dirichlet data) raises the f
 0.75-0.77 and C_D max from 0.10 to 1.54 in two windows; the remaining 23-25% loss is leakage through the soft
 wall and inflow conditions (psi not exactly constant on the walls). Shedding and the C gate remain far away.
 
+**D10 (2026-10-03) - the DeepONet instability is the learning rate, not the Reynolds range.** With the curriculum
+(deeponet_cavity_curr, stage 1: Re in [100, 200]) the run again reached 7.8% from the FD field at Re=100 after 5k
+steps and then diverged (loss 9.9 at 10k, 13.6 at 20k): the blow-up starts when the warm-up reaches the peak rate
+1e-3, inside the easiest stage. Stopped at ~30k steps (`runs/deeponet_cavity_curr_unstable`). Rerun
+deeponet_cavity_curr2 with peak lr 3e-4 and global gradient-norm clipping at 1.0 (`optim.clip_grad_norm`).
+
 **Plan change (2026-09-27, requested): finish everything within 12 hours.** The specified budgets (cylinder 16 x 200k
 steps, SPINN 300k, full ablation on A-C) need ~150-160 GPU hours. On request the remaining runs use reduced
 budgets, stated per run: cylinder row G 4 windows x 12k Adam steps with the inflow ramp (warm-up 1k, no L-BFGS; see D4, D5); SPINN row H 80k + 1k
