@@ -14,6 +14,8 @@ Endpoints (interactive docs at /docs):
     GET /field/{model}?t=&Re=&n=&ny=&nz=          binary: 4-byte little-endian header length, JSON header, float32 arrays
     GET /curve/{model}?kind=                      JSON curves (energy/dissipation, flow rate, drag, centrelines)
     GET /points/{model}                           JSON scattered points (sparse sensors of the inverse problem)
+    POST /velocity/{model}?t=&Re=&dim=            raw float32 points (N, dim) in, predicted velocities (N, dim) out
+    GET /bundle                                   tar.gz of every scene's checkpoints + references (extract at repo root)
 
 The binary field layout is documented in :func:`pack_fields`.
 """
@@ -29,6 +31,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 import numpy as np
+from fastapi import Request  # module level: endpoint annotations are resolved from module globals
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -522,6 +525,49 @@ class Scene:
         pts = np.asarray(self.problem.train_pts)
         return {"t": pts[:, 0].tolist(), "x": pts[:, 1].tolist(), "y": pts[:, 2].tolist(), "n": int(pts.shape[0])}
 
+    # ---- velocity at arbitrary points (real-time particle advection) ------------------------
+    def velocity(self, pts: np.ndarray, t: float, Re: float) -> np.ndarray:
+        """Predicted velocity at scattered points: (N, 2) -> (N, 2) for 2D scenes, (N, 3) -> (N, 3) for 3D.
+
+        Coordinates are the scene's own (dimensional for the forward cylinder, as in /field). The batch is
+        padded to a power of two so particle counts that change from frame to frame do not recompile; t and Re
+        are traced arguments, so moving the time or Reynolds number never recompiles either.
+        """
+        b = self.bench_name
+        n, d = pts.shape
+        cap = max(256, 1 << int(np.ceil(np.log2(max(n, 1)))))
+        padded = np.zeros((cap, d), np.float32)
+        padded[:n] = pts
+        if b == "cavity":
+            Re_i = min(self.params, key=lambda r: abs(r - Re))
+            key = ("vel", Re_i)
+            if key not in self._jit:
+                self.problem.set_Re(Re_i)
+                vf = self.problem.velocity_fn(self.params[Re_i])
+                self._jit[key] = jax.jit(jax.vmap(lambda p, t, Re: vf(p)[:2], in_axes=(0, None, None)))
+        elif b == "deeponet_cavity":
+            key = ("vel",)
+            if key not in self._jit:
+                net = self.problem.net
+                params = self.params
+                self._jit[key] = jax.jit(jax.vmap(lambda p, t, Re: net(params, Re)(p)[:2], in_axes=(0, None, None)))
+            Re = float(np.clip(Re, *self.spec["controls"]["Re"]))
+        elif b == "cylinder":
+            idx = min(int(max(t, 0.0) // self.dt), len(self.windows) - 1)
+            key = ("vel", idx)
+            if key not in self._jit:
+                problem, params = self.windows[idx]
+                vf = problem.velocity_dim_fn(params)
+                self._jit[key] = jax.jit(jax.vmap(lambda p, t, Re: vf(jnp.concatenate([jnp.reshape(t, (1,)), p]))[:2], in_axes=(0, None, None)))
+        else:  # tgv2d, cylinder_inverse (t, x, y) and tgv3d (t, x, y, z)
+            key = ("vel",)
+            if key not in self._jit:
+                vf = self.problem.velocity_fn(self.params)
+                k = 3 if b == "tgv3d" else 2
+                self._jit[key] = jax.jit(jax.vmap(lambda p, t, Re: vf(jnp.concatenate([jnp.reshape(t, (1,)), p]))[:k], in_axes=(0, None, None)))
+        out = self._jit[key](jnp.asarray(padded), jnp.asarray(t, jnp.float32), jnp.asarray(Re, jnp.float32))
+        return np.asarray(out, dtype=np.float32)[:n]
+
     # ---- metadata -----------------------------------------------------------------------
     def describe(self) -> Dict:
         d = {k: v for k, v in self.spec.items()}
@@ -532,12 +578,48 @@ class Scene:
 
 
 # --------------------------------------------------------------------------------------
+# bundle: everything another machine needs to serve the same scenes locally
+# --------------------------------------------------------------------------------------
+BUNDLE_PATTERNS = (
+    "config.json", "final_eval.json", "eval.json", "eval_fd.json", "cost.json", "energy_history.csv",
+    "latest.msgpack", "Re*.msgpack", "window_*/latest.msgpack",
+)
+
+
+def build_bundle(runs: Path, out: Path) -> Path:
+    """tar.gz with the registry runs (configs, final checkpoints, metric files) and the finest
+    finite-difference cavity reference per Re. Extract it at the repository root of the receiving machine:
+    files land in runs/<run>/ and data/cavity_fd/, where serve.py looks for them."""
+    import tarfile
+
+    out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_suffix(".tmp")
+    with tarfile.open(tmp, "w:gz", compresslevel=6) as tar:
+        for run in sorted({spec["run"] for spec in REGISTRY.values()}):
+            wd = runs / run
+            if not wd.exists():
+                continue
+            for pat in BUNDLE_PATTERNS:
+                for f in sorted(wd.glob(pat)):
+                    tar.add(f, arcname=f"runs/{run}/{f.relative_to(wd).as_posix()}")
+        best: Dict[str, tuple] = {}
+        for f in (DATA_DIR / "cavity_fd").glob("cavity_fd_Re*_regularised_N*.npz"):
+            Re, N = f.stem.split("_")[2], int(f.stem.split("_N")[-1])
+            if Re not in best or N > best[Re][0]:
+                best[Re] = (N, f)
+        for _, f in sorted(best.values()):
+            tar.add(f, arcname=f"data/cavity_fd/{f.name}")
+    tmp.replace(out)
+    return out
+
+
+# --------------------------------------------------------------------------------------
 # app
 # --------------------------------------------------------------------------------------
 def build_app(runs: Path, only: Optional[List[str]] = None, warm: bool = True):
     from fastapi import FastAPI, HTTPException, Query
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import Response
+    from fastapi.responses import FileResponse, Response
 
     app = FastAPI(title="pinnflow live server", version="0.1")
     from fastapi.middleware.gzip import GZipMiddleware
@@ -586,6 +668,26 @@ def build_app(runs: Path, only: Optional[List[str]] = None, warm: bool = True):
     @app.get("/points/{sid}")
     def points(sid: str):
         return get(sid).points()
+
+    @app.post("/velocity/{sid}")
+    async def velocity(sid: str, request: Request, t: float = 0.0, Re: float = 1000.0, dim: int = Query(2, ge=2, le=3)):
+        """Body: raw little-endian float32 points, shape (N, dim). Response: float32 velocities, same shape."""
+        s = get(sid)
+        body = await request.body()
+        if len(body) % (4 * dim):
+            raise HTTPException(400, f"body length {len(body)} is not a multiple of {4 * dim} bytes")
+        pts = np.frombuffer(body, dtype="<f4").reshape(-1, dim)
+        t0 = time.time()
+        vel = s.velocity(pts, t, Re)
+        return Response(content=vel.astype("<f4").tobytes(), media_type="application/octet-stream", headers={"X-Compute-Seconds": f"{time.time() - t0:.4f}"})
+
+    @app.get("/bundle")
+    def bundle(rebuild: bool = False):
+        """Download the checkpoints and references of every scene as one tar.gz (see build_bundle)."""
+        out = runs / "_bundle" / "pinn_bundle.tar.gz"
+        if rebuild or not out.exists():
+            build_bundle(runs, out)
+        return FileResponse(out, media_type="application/gzip", filename="pinn_bundle.tar.gz")
 
     if warm:  # trigger the XLA compiles now rather than on the first browser request
         for sid, s in scenes.items():
