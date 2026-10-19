@@ -185,7 +185,7 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         c.arch.hidden_dim = 192
         c.arch.fourier_emb = ml_collections.ConfigDict({"embed_scale": 3.0, "embed_dim": 192})
         t.max_steps = 80000
-        t.lbfgs_steps = 5000
+        t.lbfgs_steps = 0  # L-BFGS on one fixed batch overfits the scan noise (STATUS, 2026-10-20)
         t.data_batch_size = 1024
         t.res_batch_size = 4096
         t.bc_batch_size = 1024

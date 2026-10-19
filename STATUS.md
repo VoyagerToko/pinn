@@ -19,7 +19,7 @@ kept under their own names; nothing is deleted.
 | D Taylor-Green 3D (SPINN) | dissipation peak within 5% of the reference (0.01282 at t=9.0, digitised) | tgv3d_H (80k steps, reduced) | peak of -dE/dt 0.0292 at t=0 (127%); 2 nu zeta max 4.9e-4 (96%); no transition | **failed** (D7) |
 | inverse wake | lambda_1, lambda_2 recovered; hidden pressure | cylinder_inverse (25k + 1k, reduced) | lambda_1 = 0.99997 (0.004%), lambda_2 = 0.010006 (0.065%); hidden pressure 2.44%; u 0.54%, v 2.69% (20 snapshots) | **passed** |
 | PI-DeepONet cavity | zero-shot error < 10% at Re=400 (Re in [300, 530] never sampled in training) | deeponet_cavity_curr2 + 4 continuations (660k Adam steps in total, lr 3e-4 with clipping, last 60k with a 4x larger batch; planned 200k + 20k) | velocity vs FD at Re=400: **9.65%** (14.0% after the curriculum, then 11.1%, 10.27%, 10.11%, 9.65%); Re=100 2.1%, Re=1000 30.0% | **passed** (D8, D10-D12) |
-| real-world use case: stenosis from MRI (synthetic) | peak trans-stenotic pressure drop within 10% of the CFD truth (0.59 mmHg); simplified Bernoulli on the same scan gives 0.78 mmHg (+31%) | stenosis_mri_G, laptop budget (6 x 128, 40k + 2k L-BFGS), started 2026-10-20 01:5x on the RTX 3060 | pending | **training** |
+| real-world use case: stenosis from MRI (synthetic) | peak trans-stenotic pressure drop within 10% of the CFD truth (0.594 mmHg) | stenosis_mri_G (2026-10-20, RTX 3060 Laptop, 6 x 128, 40k Adam steps, 1.6 h; served checkpoint = end of Adam) | peak dp 0.557 mmHg (**6.2%**), cycle RMS 2.9%; hidden pressure 3.9%, u 4.1% (v 62%: the cross-flow is small); simplified Bernoulli on the same scan 0.781 mmHg (+31.5%) | **passed** |
 
 ## Run log
 
@@ -266,6 +266,16 @@ is not meaningful then (the JAX peak is).
     so that size is for the desktop.
   - The overnight laptop run uses 6 x 128 with 2048 points.
   - Evaluation: 50 s the first time (compile), then 0.3 s.
+- **Run stenosis_mri_G (2026-10-20 01:5x to 04:55 IST, laptop).**
+  - A first run with soft no-slip walls (kept as `runs/stenosis_mri_G_softwall_5k`) learned almost no pressure: the
+    peak dp was 7e-4 mmHg at step 5k, and the walls slipped by 0.24 RMS. The fix was exact walls (stream function
+    built from eta = y/h(x), with a learned Fourier flow rate Q(t)) and the pressure output scaled by 10.
+  - With exact walls, the peak dp error went from 30% at step 5k to 12% at 10k, 8.4% at 15k, 7.7% at 25k and
+    6.2% at 40k.
+  - **L-BFGS overfits the scan.** 2000 iterations on one fixed batch drove the loss from 1.6 to 1.4e-4, far
+    below the noise floor. Afterwards the pressure error was 8.0% and the peak dp error 12.9%, with u at 22%.
+  - The served `latest.msgpack` is therefore `ckpt_40000` (end of Adam). The L-BFGS result is kept as
+    `latest_lbfgs.msgpack` and `final_eval_after_lbfgs.json`, and `lbfgs_steps` now defaults to 0 for this benchmark.
 - **Viewer.** The "Real-world use case" tab shows the scan and the CFD truth before training. The trained network
   plugs in on the next server restart (`scripts/train_local_wsl.sh` restarts it when training ends).
 

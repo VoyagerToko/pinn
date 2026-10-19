@@ -240,6 +240,8 @@ pytest tests/test_vessel.py                          # Poiseuille check of the s
 - **The network (`pinnflow/problems/stenosis_inverse.py`).**
   - It outputs a stream function and pressure, so continuity holds exactly, and it is exactly periodic in time
     with the heartbeat.
+  - The wall is imposed exactly: psi is built from eta = y/h(x), with a learned Fourier flow rate Q(t) initialised
+    from the scan's flux.
   - It is fitted to each voxel through the average of the network over that voxel and phase window.
   - Momentum residuals apply at the known viscosity, the wall is no-slip, and one point pins the pressure gauge.
   - Pressure is never given to it.
@@ -249,6 +251,16 @@ pytest tests/test_vessel.py                          # Poiseuille check of the s
   - The truth peaks at **0.59 mmHg**. The Bernoulli estimate is 0.78 mmHg, 32% too high, because it ignores the
     viscous losses and the inflow kinetic energy.
   - The gradient is mild because Re is kept modest; `--Re` and `--severity` change it.
+  - **Result** (stenosis_mri_G, 40k Adam steps on the laptop GPU):
+
+    | Quantity | Value |
+    |---|---|
+    | Network peak pressure drop | 0.557 mmHg, **6.2%** from the truth |
+    | Cycle RMS error of the drop | 2.9% |
+    | Hidden pressure field error | 3.9% |
+    | Simplified Bernoulli on the same scan | 31% too high |
+
+    L-BFGS on a fixed batch overfits the scan's noise, so it is off for this benchmark (STATUS).
 - **Viewer and server.** The scene lives in the viewer's "Real-world use case" tab.
   - Before training, the server already serves the scan and the CFD truth, labelled as untrained.
   - After training, restart the server: `runs/stenosis_mri_G/latest.msgpack` and `final_eval.json` plug in as they

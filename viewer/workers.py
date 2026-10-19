@@ -244,6 +244,10 @@ class ParticleEngine(QThread):
                 last = time.perf_counter()
                 continue
             new = pos + dt * v2
+            # a particle that left the fluid (the network's extrapolation beyond a wall) retires and stops moving
+            bad = ~np.isfinite(new).all(-1) | (np.abs(new - 0.5 * (lo + hi)) > 2 * (hi - lo)).any(-1)
+            active &= ~bad
+            new = np.where(active[:, None], new, np.clip(np.nan_to_num(pos), lo, hi))
             if spec.periodic:
                 new = lo + np.mod(new - lo, hi - lo)
             elif spec.emitter is not None:
