@@ -187,6 +187,14 @@ To reach the server from another machine on the network, either set `networkingM
 `%USERPROFILE%\.wslconfig` (then `wsl --shutdown`) or forward the port with `netsh interface portproxy`, and open
 TCP 8000 in the Windows firewall.
 
+**Running the scenes on another machine's GPU.** The checkpoints are small (37.7 MB for all seven scenes with
+their references). On the training machine the server offers them at `/bundle`; on the other machine
+`curl -o pinn_bundle.tar.gz http://<host>:8000/bundle && tar -xzf pinn_bundle.tar.gz` at the repository root,
+then `wsl -d Ubuntu -- bash /mnt/c/.../pinn/scripts/serve_local_wsl.sh`, which prints the address to use.
+Measured on an RTX 3060 Laptop (`scripts/bench_server.py`): 5,000 particle velocities in 11-14 ms (70-90 updates/s)
+via the WSL address, 64-75 ms via `localhost` (Windows' forwarding into WSL); full fields 18-215 ms per 128^2 frame
+depending on the scene, 82 ms per 48^3 3D frame; first request per grid size compiles for 20-30 s.
+
 ## 7. Deviations from the handbook and things to know
 
 See also `CLAUDE.md` (project brief for assistants and contributors), `STATUS.md` (benchmark results and open
