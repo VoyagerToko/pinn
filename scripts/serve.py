@@ -146,14 +146,16 @@ def read_json(path: Path) -> Dict:
         return {}
 
 
-def pack_fields(fields: Dict[str, np.ndarray], header: Dict) -> bytes:
-    """Binary payload: uint32 LE header length, UTF-8 JSON header, then float32 arrays in header['fields'] order.
+def pack_fields(fields: Dict[str, np.ndarray], header: Dict, dtype: str = "float32") -> bytes:
+    """Binary payload: uint32 LE header length, UTF-8 JSON header, then the arrays in header['fields'] order.
 
-    header gets 'fields' (names), 'shape' (grid shape, 'ij' order: first axis x), 'dtype'.
+    header gets 'fields' (names), 'shape' (grid shape, 'ij' order: first axis x) and 'dtype'
+    ('float32', or 'float16' to halve the payload for display; NaN marks points outside the fluid).
     """
     names = list(fields)
-    header = dict(header, fields=names, dtype="float32")
-    arrays = [np.ascontiguousarray(np.asarray(fields[k], dtype=np.float32)).tobytes() for k in names]
+    np_dtype = np.float16 if dtype == "float16" else np.float32
+    header = dict(header, fields=names, dtype=np.dtype(np_dtype).name)
+    arrays = [np.ascontiguousarray(np.asarray(fields[k], dtype=np_dtype)).tobytes() for k in names]
     hb = json.dumps(header).encode("utf-8")
     return struct.pack("<I", len(hb)) + hb + b"".join(arrays)
 
@@ -250,16 +252,18 @@ class Scene:
         return np.concatenate(outs, axis=0)
 
     # ---- field requests -----------------------------------------------------------
-    def field(self, t: float, Re: float, n: int, ny: Optional[int], nz: Optional[int]) -> bytes:
+    def field(self, t: float, Re: float, n: int, ny: Optional[int], nz: Optional[int], dtype: str = "float32") -> bytes:
         b = self.bench_name
         if b == "tgv3d":
-            return self._field_tgv3d(t, n)
+            return self._field_tgv3d(t, n, dtype)
         ext = self.domain
         aspect = (ext[3] - ext[2]) / (ext[1] - ext[0])
         nx = int(n)
         ny = int(ny) if ny else max(8, int(round(nx * aspect)))
         x, y, X, Y = grid2d(ext, nx, ny)
-        header = {"model": self.id, "shape": [nx, ny], "extent": ext, "t": t, "Re": Re, "x": x.tolist(), "y": y.tolist()}
+        header = {"model": self.id, "shape": [nx, ny], "extent": ext, "x": x.tolist(), "y": y.tolist()}
+        if "t" in self.spec["controls"]:
+            header["t"] = t
         pts2 = np.stack([X.ravel(), Y.ravel()], -1)
         fields: Dict[str, np.ndarray] = {}
 
@@ -328,15 +332,15 @@ class Scene:
                 fields[k] = a
             header["cylinder"] = {"center": list(bch.center), "radius": bch.radius}
             header["window"] = idx
-        return pack_fields(fields, header)
+        return pack_fields(fields, header, dtype)
 
-    def _field_tgv3d(self, t: float, n: int) -> bytes:
+    def _field_tgv3d(self, t: float, n: int, dtype: str = "float32") -> bytes:
         n = int(n)
         f = self.problem.grid_fields(self.params, float(t), n)
         g = np.linspace(0, 2 * np.pi, n, endpoint=False)
         header = {"model": self.id, "shape": [n, n, n], "extent": self.domain, "t": t, "axis": g.tolist()}
         fields = {"u": f["velocity"][:, 0], "v": f["velocity"][:, 1], "w": f["velocity"][:, 2], "speed": f["speed"], "q": f["qcriterion"], "vort_mag": np.linalg.norm(f["vorticity"], axis=1)}
-        return pack_fields(fields, header)
+        return pack_fields(fields, header, dtype)
 
     # ---- references -------------------------------------------------------------------
     def _cavity_fd(self, Re: int, x: np.ndarray, y: np.ndarray):
@@ -536,6 +540,9 @@ def build_app(runs: Path, only: Optional[List[str]] = None, warm: bool = True):
     from fastapi.responses import Response
 
     app = FastAPI(title="pinnflow live server", version="0.1")
+    from fastapi.middleware.gzip import GZipMiddleware
+
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], expose_headers=["*"])
     scenes: Dict[str, Scene] = {}
     for sid, spec in REGISTRY.items():
@@ -566,10 +573,10 @@ def build_app(runs: Path, only: Optional[List[str]] = None, warm: bool = True):
         return [s.describe() for s in scenes.values()]
 
     @app.get("/field/{sid}")
-    def field(sid: str, t: float = 0.0, Re: float = 1000.0, n: int = Query(128, ge=8, le=512), ny: Optional[int] = None, nz: Optional[int] = None):
+    def field(sid: str, t: float = 0.0, Re: float = 1000.0, n: int = Query(128, ge=8, le=512), ny: Optional[int] = None, nz: Optional[int] = None, dtype: str = Query("float32", pattern="^(float32|float16)$")):
         s = get(sid)
         t0 = time.time()
-        payload = s.field(t, Re, n, ny, nz)
+        payload = s.field(t, Re, n, ny, nz, dtype)
         return Response(content=payload, media_type="application/octet-stream", headers={"X-Compute-Seconds": f"{time.time() - t0:.3f}"})
 
     @app.get("/curve/{sid}")
