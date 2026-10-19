@@ -169,6 +169,24 @@ Row A-C configs (VP formulation, second order) are about 3x cheaper per step tha
   handbook's 64^4 (`--set training.n_per_axis="(64,64,64,64)"`) does **not** fit in 16 GB (one 11.1 GB buffer).
 * Always `export XLA_PYTHON_CLIENT_PREALLOCATE=false` in WSL so the display driver keeps its share.
 
+## 6b. Live inference server (STEP 9.5)
+
+`scripts/serve.py` loads the trained checkpoints onto the GPU once and serves fields, curves and sensor
+points over HTTP for the visual application in `app/` (binary float32 fields, JSON curves, CORS enabled):
+
+```bash
+pip install fastapi "uvicorn[standard]"
+export XLA_PYTHON_CLIENT_PREALLOCATE=false
+nohup python scripts/serve.py --port 8000 > runs/serve.log 2>&1 &
+curl http://localhost:8000/health        # interactive docs at /docs
+```
+
+Scenes and the runs that back them are listed in `REGISTRY` at the top of the script; missing runs are skipped.
+The first request per model and grid size compiles (seconds on a GPU); results are cached per request key.
+To reach the server from another machine on the network, either set `networkingMode=mirrored` under `[wsl2]` in
+`%USERPROFILE%\.wslconfig` (then `wsl --shutdown`) or forward the port with `netsh interface portproxy`, and open
+TCP 8000 in the Windows firewall.
+
 ## 7. Deviations from the handbook and things to know
 
 See also `CLAUDE.md` (project brief for assistants and contributors), `STATUS.md` (benchmark results and open
