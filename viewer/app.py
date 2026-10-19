@@ -1,0 +1,642 @@
+"""The window. Run: python -m viewer   (options: --server URL, --scene ID, --shot PNG for a screenshot and exit)."""
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from typing import Dict, Optional
+
+import numpy as np
+from PySide6.QtCore import QThread, QTimer, Qt, Signal
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QMainWindow, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
+
+from viewer import render, theme
+from viewer import scenes as S
+from viewer.bath import Bath2D
+from viewer.client import Client, find_server, start_wsl_server, wsl_path, ROOT
+from viewer.controls import PlayButton, ReBar, SceneRail, TimeBar, VerdictStamp, ViewChips
+from viewer.rack import Rack
+from viewer.workers import AuxWorker, FieldWorker, ParticleEngine, Warmer
+
+CAPTIONS = {
+    "tgv2d": "The error stays below the gate across the whole time window. The exact solution is known in closed form, so this scene checks the physics itself.",
+    "cavity_ok": "The network's velocity along the vertical centreline against Ghia's 1982 data. Against a converged finite-difference solution of the same problem the field differs by 0.27 %.",
+    "cavity_hard": "Open the divergence view. With the lid speed and the walls imposed exactly, the two top corners cannot conserve mass, and the whole vortex comes out too weak.",
+    "inverse": "The network saw only velocity at scattered points. The pressure field and both coefficients of the equations were never measured; it recovered them.",
+    "cylinder_fwd": "Every bar should reach the line: the mass that enters must leave. At the reduced training budget a quarter of it is lost downstream, and the wake never sheds.",
+    "tgv3d": "The reference peaks near t = 9, where the flow turns turbulent. The network's dissipation is largest at the start and never peaks: it keeps the flow smooth.",
+    "deeponet": "Drag the lid speed. Every position is one forward pass of one network. The hatched band was never sampled in training; Re 400 sits inside it.",
+}
+SHEET = {
+    "tgv2d": ("Reference: exact solution", "same instant, same colour scale"),
+    "cavity_ok": ("Reference: finite differences", "converged solution of the same lid, same colour scale"),
+    "cavity_hard": ("Reference: finite differences", "converged solution of the same lid, same colour scale"),
+    "inverse": ("Reference: Nektar data", ""),
+    "cylinder_fwd": ("Reference", ""),
+    "tgv3d": ("Reference", ""),
+    "deeponet": ("Reference: finite differences", ""),
+}
+EMPTY = {
+    "cylinder_fwd": "FEATFLOW publishes drag, lift and pressure-probe series for this benchmark, not a field. The chart below carries the evidence.",
+    "tgv3d": "The reference for the 3D vortex is a DNS dissipation curve (DeBonis 2013), not a field. It is drawn below.",
+}
+
+
+class Connector(QThread):
+    found = Signal(str, object)
+    failed = Signal()
+
+    def __init__(self, url: Optional[str]):
+        super().__init__()
+        self.url = url
+
+    def run(self):
+        res = find_server([self.url] if self.url else None)
+        if not res:
+            self.failed.emit()
+            return
+        url, health = res
+        try:
+            c = Client(url)
+            models = c.models()
+            c.close()
+        except Exception:
+            self.failed.emit()
+            return
+        self.found.emit(url, {"health": health, "models": models})
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, args):
+        super().__init__()
+        self.args = args
+        self.setWindowTitle("pinnflow: the trained flows, live")
+        self.resize(*args.size)
+        self.setMinimumSize(1240, 760)
+        ground = QWidget(objectName="ground")
+        self.setCentralWidget(ground)
+        outer = QVBoxLayout(ground)
+        outer.setContentsMargins(28, 14, 28, 14)
+        outer.setSpacing(12)
+
+        self.rail = SceneRail()
+        outer.addWidget(self.rail)
+
+        body = QHBoxLayout()
+        body.setSpacing(26)
+        outer.addLayout(body, 1)
+        left = QVBoxLayout()
+        left.setSpacing(6)
+        body.addLayout(left, 62)
+
+        head = QHBoxLayout()
+        titles = QVBoxLayout()
+        titles.setSpacing(2)
+        self.title = QLabel("Connecting")
+        self.title.setFont(theme.font("display", 32, 600))
+        self.title.setStyleSheet(f"color: {theme.INK};")
+        self.summary = QLabel("")
+        self.summary.setWordWrap(True)
+        self.summary.setFont(theme.font("text", 13.5, 400))
+        self.summary.setStyleSheet(f"color: {theme.INK_SOFT};")
+        self.summary.setMaximumWidth(720)
+        titles.addWidget(self.title)
+        titles.addWidget(self.summary)
+        titles.addStretch(1)
+        head.addLayout(titles, 1)
+        self.stamp = VerdictStamp()
+        head.addWidget(self.stamp, 0, Qt.AlignTop)
+        left.addLayout(head)
+
+        self.stage = QStackedWidget()
+        self.bath = Bath2D()
+        self.stage.addWidget(self.bath)
+        self.tank = None
+        left.addWidget(self.stage, 1)
+
+        self.mode_line = QLabel("")
+        self.mode_line.setFont(theme.font("text", 12, 400))
+        self.mode_line.setStyleSheet(f"color: {theme.HAIR};")
+        left.addWidget(self.mode_line)
+
+        self.rack = Rack()
+        body.addWidget(self.rack, 38)
+
+        bottom = QHBoxLayout()
+        bottom.setSpacing(20)
+        self.play = PlayButton()
+        self.timebar = TimeBar()
+        self.rebar = ReBar()
+        self.controls = QStackedWidget()
+        self.controls.addWidget(self.timebar)
+        self.controls.addWidget(self.rebar)
+        self.controls.setFixedHeight(56)
+        self.chips = ViewChips()
+        self.live = QLabel("")
+        self.live.setFont(theme.font("text", 12, 400, tabular=True))
+        self.live.setStyleSheet(f"color: {theme.HAIR};")
+        self.live.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.hint = QLabel("click drops pigment, drag combs a line, space plays, 1 to 7 change scene")
+        self.hint.setFont(theme.font("text", 12, 400))
+        self.hint.setStyleSheet(f"color: {theme.HAIR};")
+        bottom.addWidget(self.play, 0, Qt.AlignVCenter)
+        bottom.addWidget(self.controls, 3)
+        bottom.addWidget(self.chips, 0, Qt.AlignVCenter)
+        tail = QVBoxLayout()
+        tail.setSpacing(0)
+        tail.addWidget(self.live)
+        tail.addWidget(self.hint)
+        bottom.addLayout(tail, 2)
+        outer.addLayout(bottom)
+
+        # state
+        self.url = None
+        self.device = ""
+        self.models: Dict[str, Dict] = {}
+        self.spec: Optional[S.SceneSpec] = None
+        self.view = "pigment"
+        self.t = 0.0
+        self.Re = 1000.0
+        self.playing = False
+        self.last_field: Dict[str, Dict] = {}
+        self.scales: Dict = {}
+        self.curves: Dict[str, Dict] = {}
+        self.points: Dict[str, np.ndarray] = {}
+        self.lines: Dict = {}
+        self.field_ms = 0.0
+        self.drop_i = 0
+        self._cursor_at = 0.0
+        self.engine = self.fieldw = self.aux = self.warmer = None
+        self._retry = 0
+
+        self.rail.chosen.connect(self.select_scene)
+        self.chips.chosen.connect(self.set_view)
+        self.play.toggled.connect(self.set_playing)
+        self.timebar.scrubbed.connect(self.scrub)
+        self.rebar.changed.connect(self.set_Re)
+        self.bath.dropped.connect(self.on_drop)
+        for key, fn in (("Space", self.toggle_play), ("R", self.reset_dye), ("V", self.next_view), ("F", self.toggle_full), ("Escape", self.leave_full),
+                        ("S", self.start_server), ("Left", lambda: self.nudge(-1)), ("Right", lambda: self.nudge(1)), ("D", self.drop_random)):
+            QShortcut(QKeySequence(key), self, activated=fn)
+        for i, s in enumerate(S.SCENES):
+            QShortcut(QKeySequence(str(i + 1)), self, activated=lambda sid=s.sid: self.select_scene(sid))
+
+        self.bath.state = "connecting"
+        self.bath.state_text = "Looking for the network server"
+        self.connect_server()
+
+    # ------------------------------------------------------------------ server
+    def connect_server(self):
+        self.connector = Connector(self.args.server)
+        self.connector.found.connect(self.on_connected)
+        self.connector.failed.connect(self.on_offline)
+        self.connector.start()
+
+    def on_offline(self):
+        self.bath.state = "offline"
+        cmd = f"wsl -d Ubuntu -- bash {wsl_path(ROOT / 'scripts' / 'serve_local_wsl.sh')}"
+        self.bath.state_text = "No network server is answering.\nPress S to start it in WSL, or run:\n" + cmd
+        self.title.setText("Waiting for the server")
+        self.bath.update()
+        if self._retry:
+            self._retry -= 1
+            QTimer.singleShot(3000, self.connect_server)
+
+    def start_server(self):
+        if self.url:
+            return
+        if start_wsl_server():
+            self.bath.state = "connecting"
+            self.bath.state_text = "Starting the network server in WSL\n(the first start loads seven models, about 30 s)"
+            self.bath.update()
+            self._retry = 40
+            QTimer.singleShot(4000, self.connect_server)
+
+    def on_connected(self, url: str, info: Dict):
+        self.url = url
+        self.device = info["health"].get("device", "")
+        self.models = {m["id"]: m for m in info["models"]}
+        self.rail.available = set(self.models)
+        self.engine = ParticleEngine(url)
+        self.engine.stepped.connect(self.on_step)
+        self.engine.status.connect(self.on_status)
+        self.bath.raster_size.connect(self.engine.set_raster_size)
+        self.engine.start()
+        r = self.bath.domain_rect()
+        self.engine.set_raster_size(max(8, int(r.width() / 2)), max(8, int(r.height() / 2)))
+        self.fieldw = FieldWorker(url)
+        self.fieldw.ready.connect(self.on_field)
+        self.fieldw.status.connect(self.on_status)
+        self.fieldw.start()
+        self.aux = AuxWorker(url, {sid: m["run"] for sid, m in self.models.items()})
+        self.aux.curve.connect(self.on_curve)
+        self.aux.points.connect(self.on_points)
+        self.aux.centreline.connect(self.on_line)
+        self.aux.start()
+        first = self.args.scene if self.args.scene in self.models else next(s.sid for s in S.SCENES if s.sid in self.models)
+        self.warmer = Warmer(url, self.models, first)
+        self.warmer.progress.connect(self.on_warm)
+        self.warmer.start()
+        self.select_scene(first)
+        if self.args.view:
+            self.set_view(self.args.view)
+        if self.args.Re:
+            self.set_Re(self.args.Re)
+        if self.args.play:
+            self.set_playing(True)
+        if self.args.shot:
+            QTimer.singleShot(int(self.args.wait * 1000), self.take_shot)
+
+    # ------------------------------------------------------------------ scenes
+    def select_scene(self, sid: str):
+        if sid not in self.models or self.engine is None:
+            return
+        spec = S.BY_ID[sid]
+        m = self.models[sid]
+        self.spec = spec
+        ctl = m.get("controls", {})
+        domain = [float(v) for v in m["domain"]]
+        self.rail.active = sid
+        self.rail.update()
+        self.title.setText(spec.name)
+        self.summary.setText(m.get("summary", ""))
+        self.stamp.set(spec.verdict, spec.headline, spec.headline_label, spec.pigment)
+        self.view = "pigment"
+        self.chips.configure(spec.views, self.view, spec.pigment, spec.evidence)
+        self.set_playing(False)
+        self.play.setVisible(spec.play_rate > 0)
+        if "t" in ctl:
+            t0, t1 = ctl["t"]
+            self.t = float(t1) if spec.start_at_end else float(t0)
+            self.timebar.set_range(t0, t1, "s" if sid == "cylinder_fwd" else "", spec.pigment)
+            self.timebar.set_t(self.t)
+            self.controls.setCurrentWidget(self.timebar)
+        else:
+            self.t = 0.0
+        if spec.re_mode == "discrete":
+            vals = sorted(float(v) for v in ctl.get("Re", [100, 400, 1000]))
+            self.Re = vals[-1]
+            self.rebar.configure("discrete", values=vals, pigment=spec.pigment, Re=self.Re)
+            self.controls.setCurrentWidget(self.rebar)
+        elif spec.re_mode == "continuous":
+            lo, hi = ctl.get("Re", [100.0, 1000.0])
+            self.Re = 400.0
+            self.rebar.configure("continuous", lo=lo, hi=hi, holdout=ctl.get("holdout"), pigment=spec.pigment, Re=self.Re)
+            self.controls.setCurrentWidget(self.rebar)
+        else:
+            self.Re = 1000.0
+        if spec.dims == 3:
+            if self.tank is None:
+                from viewer.tank import Tank3D
+
+                self.tank = Tank3D()
+                self.stage.addWidget(self.tank)
+            self.stage.setCurrentWidget(self.tank)
+        else:
+            self.stage.setCurrentWidget(self.bath)
+            self.bath.domain = domain[:4]
+            self.bath.field_img = None
+            self.bath.pigment_img = None
+            self.bath.cylinder = None
+            self.bath.sensors = None
+            self.bath.legend = None
+            ready = self.rail.ready.get(sid) == "ready"
+            self.bath.state = "live" if ready else "compiling"
+            self.bath.state_text = "" if ready else "Compiling this scene's network on the GPU\n(first time only, about 25 s; the pigment moves when it is ready)"
+            r = self.bath.domain_rect()
+            self.engine.set_raster_size(max(8, int(r.width() * self.devicePixelRatioF() / 2)), max(8, int(r.height() * self.devicePixelRatioF() / 2)))
+            self.bath.update()
+        self.engine.set_scene(spec, domain, self.t, self.Re, ctl.get("t"))
+        self.request_field()
+        title, note = SHEET[sid]
+        self.rack.sheet.title, self.rack.sheet.note = title, note
+        self.rack.sheet.domain = domain[:4] if spec.dims == 2 else [0, 1, 0, 1]
+        self.rack.sheet.image = None
+        self.rack.sheet.cylinder = None
+        self.rack.sheet.empty = EMPTY.get(sid, "Waiting for the first frame")
+        self.rack.set_compact(sid in EMPTY)  # no reference field: a short note, the chart takes the room
+        self.rack.sheet.update()
+        self.rack.caption.setText(CAPTIONS.get(sid, ""))
+        self.rack.chart.clear("Loading the evidence for this scene")
+        if spec.chart in ("centreline_live",):
+            self.aux.want_curve(sid)
+            self.aux.want_centreline(sid, self.Re)
+        elif spec.chart != "none":
+            self.aux.want_curve(sid)
+        if sid == "inverse" and sid not in self.points:
+            self.aux.want_points(sid)
+        self.update_mode_line()
+
+    def request_field(self):
+        if self.spec and self.fieldw:
+            self.fieldw.request(self.spec.sid, self.t, self.Re, self.spec.field_n)
+
+    def update_mode_line(self):
+        s = self.spec
+        if s is None:
+            return
+        if s.play_rate == 0:
+            txt = f"Steady flow at Re {self.Re:.0f}: at every update the network is asked for the velocity at each particle, and the pigment moves with it."
+        elif s.coupled:
+            txt = ("Playing: flow time and pigment advance together, so the trails are true pathlines." if self.playing
+                   else f"Paused: the flow is frozen at t = {self.t:.2f} and the pigment follows that instant. Press space to run time.")
+        else:
+            txt = f"The pigment follows the instantaneous flow at t = {self.t:.2f}. Play or drag the time bar to move t."
+        self.mode_line.setText(txt)
+
+    # ------------------------------------------------------------------ controls
+    def set_view(self, view: str):
+        if self.spec is None or view not in self.spec.views:
+            return
+        self.view = view
+        self.chips.configure(self.spec.views, view, self.spec.pigment, self.spec.evidence)
+        self.render_field()
+
+    def next_view(self):
+        if self.spec:
+            v = self.spec.views
+            self.set_view(v[(v.index(self.view) + 1) % len(v)])
+
+    def set_playing(self, on: bool):
+        if self.spec is None or self.spec.play_rate == 0:
+            on = False
+        self.playing = on
+        self.play.set_playing(on)
+        if self.engine:
+            self.engine.set_playing(on)
+        self.update_mode_line()
+
+    def toggle_play(self):
+        self.set_playing(not self.playing)
+
+    def scrub(self, t: float):
+        self.t = t
+        self.timebar.set_t(t)
+        if self.engine:
+            self.engine.set_time(t)
+        self.request_field()
+        self.rack.chart.move_cursor(t)
+        self.update_mode_line()
+
+    def nudge(self, d: int):
+        if self.spec and self.controls.currentWidget() is self.timebar and not self.playing:
+            span = self.timebar.t1 - self.timebar.t0
+            self.scrub(min(max(self.t + d * span / 50, self.timebar.t0), self.timebar.t1))
+
+    def set_Re(self, Re: float):
+        self.Re = float(Re)
+        self.rebar.Re = self.Re
+        self.rebar.update()
+        if self.engine:
+            self.engine.set_Re(self.Re)
+        self.request_field()
+        sid = self.spec.sid if self.spec else None
+        if sid and self.spec.chart == "centreline_live":
+            self.aux.want_centreline(sid, self.Re)
+        elif sid and sid in self.curves:
+            self.draw_chart()
+        self.update_mode_line()
+
+    def reset_dye(self):
+        if self.engine:
+            self.engine.reset()
+
+    def on_drop(self, pts):
+        if self.engine:
+            self.engine.drop(pts, 2 + self.drop_i % len(theme.DROP_ORDER))
+            self.drop_i += 1
+
+    def drop_random(self):
+        if self.spec is None or self.engine is None:
+            return
+        m = self.models[self.spec.sid]
+        d = np.asarray(m["domain"], np.float32)
+        lo, hi = d[0::2], d[1::2]
+        c = lo + np.random.random(len(lo)).astype(np.float32) * (hi - lo)
+        pts = c + np.random.normal(0, 0.04, (360, len(lo))).astype(np.float32) * (hi - lo)
+        self.on_drop(np.clip(pts, lo, hi))
+
+    def toggle_full(self):
+        self.showNormal() if self.isFullScreen() else self.showFullScreen()
+
+    def leave_full(self):
+        if self.isFullScreen():
+            self.showNormal()
+
+    # ------------------------------------------------------------------ data in
+    def on_status(self, sid: str, msg: str):
+        if self.spec is None or sid != self.spec.sid:
+            return
+        if msg == "live":
+            self.bath.state, self.bath.state_text = "live", ""
+        elif msg == "compiling":
+            if self.rail.ready.get(sid) != "ready":
+                self.bath.state = "compiling"
+        elif msg.startswith("error") or msg.startswith("field error"):
+            self.bath.state = "offline"
+            self.bath.state_text = "The network server stopped answering.\nIt is retried every second; press S to restart it in WSL."
+        self.bath.update()
+
+    def on_warm(self, sid: str, state: str):
+        self.rail.ready[sid] = state
+        self.rail.update()
+
+    def on_step(self, pl: Dict):
+        if self.spec is None or pl["sid"] != self.spec.sid:
+            return
+        if self.spec.dims == 2:
+            img = pl.get("image")
+            if img is not None:
+                self.bath.pigment_img = render.qimage(img)
+            if self.bath.state != "offline":
+                self.bath.state = "live"
+                self.bath.state_text = ""
+            self.bath.update()
+        elif self.tank is not None:
+            self.tank.update_particles(pl["hist"], pl["active"], pl["pig"], pl["colors"], pl["playing"])
+        if self.playing:
+            self.t = pl["t"]
+            self.timebar.set_t(self.t)
+            self.request_field()
+            now = time.perf_counter()
+            if now - self._cursor_at > 0.15:
+                self._cursor_at = now
+                self.rack.chart.move_cursor(self.t)
+                self.update_mode_line()
+                if self.view == "sensors":
+                    self.update_sensors()
+        dev = "GPU" if "cuda" in self.device else self.device
+        self.live.setText(f"live on the {dev}   {pl['hz']:.0f} updates/s   velocity {pl['vel_ms']:.0f} ms   field {self.field_ms:.0f} ms")
+
+    def on_field(self, res: Dict):
+        if self.spec is None or res["sid"] != self.spec.sid:
+            return
+        self.field_ms = res["ms"]
+        self.last_field[res["sid"]] = res
+        self.render_field()
+
+    def render_field(self):
+        if self.spec is None:
+            return
+        res = self.last_field.get(self.spec.sid)
+        if res is None:
+            return
+        f, hdr, sid, view = res["fields"], res["hdr"], self.spec.sid, self.view
+        if self.spec.dims == 3:
+            if self.tank is not None:
+                self.tank.update_field(f, int(hdr["shape"][0]))
+            return
+        base_view = "speed" if view in ("pigment", "sensors") else view
+        a = render.scalar(f, base_view)
+        ref = render.scalar(f, base_view, ref=True)
+        if a is None:
+            return
+        if base_view == "error":
+            lo, hi = render.scale_for([a], "error")
+        else:
+            key = (sid, base_view, res["Re"] if self.spec.re_mode else None)
+            if key not in self.scales:
+                self.scales[key] = render.scale_for([a, ref], base_view)
+            lo, hi = self.scales[key]
+        draw_view = view if view in ("pigment", "sensors") else base_view
+        self.bath.field_img = render.qimage(render.to_rgb(a, draw_view, lo, hi))
+        self.bath.pigment_opacity = 1.0 if view in ("pigment", "sensors") else 0.38
+        self.bath.cylinder = hdr.get("cylinder")
+        self.bath.legend = None if view in ("pigment", "sensors") else (render.colour_map(base_view), lo, hi, _legend_label(base_view, sid))
+        if view == "sensors":
+            self.update_sensors()
+        else:
+            self.bath.sensors = None
+        self.bath.update()
+        # the pulled print: the reference at the same instant and scale
+        sheet = self.rack.sheet
+        ref_view = base_view if ref is not None else "speed"
+        if ref is None:
+            ref = render.scalar(f, "speed", ref=True)
+        if ref is not None:
+            rkey = (sid, ref_view, res["Re"] if self.spec.re_mode else None)
+            rlo, rhi = (lo, hi) if ref_view == base_view else self.scales.setdefault(rkey, render.scale_for([ref, render.scalar(f, ref_view)], ref_view))
+            sheet.image = render.qimage(render.to_rgb(ref, ref_view, rlo, rhi))
+            sheet.cylinder = hdr.get("cylinder")
+            if sid == "inverse":
+                sheet.note = f"nearest data snapshot, t = {hdr.get('t_ref', self.t):.1f}; same colour scale"
+            elif sid == "deeponet":
+                sheet.note = f"Re {res['Re']:.0f}, same colour scale"
+            elif view in ("pigment", "sensors"):
+                sheet.note = "reference speed, on the speed view's colour scale"
+            elif ref_view != base_view:
+                sheet.note = f"reference {ref_view}; the {base_view} view has no reference counterpart"
+            else:
+                sheet.note = SHEET[sid][1]
+        else:
+            sheet.image = None
+            sheet.empty = EMPTY.get(sid, "No reference at this setting." if sid != "deeponet" else
+                                    f"No reference at Re {res['Re']:.0f}: finite-difference solutions exist at 100, 400 and 1000. The network's flow is still live on the left.")
+        sheet.update()
+        err = render.rel_l2(f)
+        if err is not None:
+            self.stamp.set_live(f"this frame, live: {_fmt_err(err, self.spec.headline)} from the reference")
+        else:
+            self.stamp.set_live("")
+
+    def update_sensors(self):
+        pts = self.points.get("inverse")
+        if pts is None:
+            self.bath.sensors = None
+            return
+        sel = np.abs(pts[:, 0] - self.t) < 0.6
+        self.bath.sensors = pts[sel, 1:3]
+
+    def on_curve(self, sid: str, data: Dict):
+        self.curves[sid] = data
+        if self.spec and sid == self.spec.sid:
+            self.draw_chart()
+
+    def on_points(self, sid: str, data: Dict):
+        if data:
+            self.points[sid] = np.stack([data["t"], data["x"], data["y"]], -1).astype(np.float32)
+            if self.view == "sensors":
+                self.update_sensors()
+
+    def on_line(self, sid: str, Re: float, line: Dict):
+        self.lines[sid] = (Re, line)
+        if self.spec and sid == self.spec.sid:
+            self.draw_chart()
+
+    def draw_chart(self):
+        s = self.spec
+        if s is None:
+            return
+        data = self.curves.get(s.sid)
+        if s.chart == "centreline_live":
+            line = self.lines.get(s.sid)
+            if line is None or data is None:
+                return
+            self.rack.chart.draw("centreline", data, s.pigment, Re=line[0], line=line[1])
+        elif data is not None:
+            self.rack.chart.draw(s.chart, data, s.pigment, t=self.t, Re=self.Re)
+
+    # ------------------------------------------------------------------ screenshots
+    def take_shot(self):
+        img = self.grab().toImage()
+        if self.spec is not None and self.spec.dims == 3 and self.tank is not None:
+            from PySide6.QtGui import QImage, QPainter
+
+            arr = np.ascontiguousarray(self.tank.grab_image()[..., :3])
+            h, w = arr.shape[:2]
+            q = QImage(arr.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+            pos = self.tank.plotter.interactor.mapTo(self, self.tank.plotter.interactor.rect().topLeft())
+            from PySide6.QtCore import QRectF
+
+            p = QPainter(img)
+            ia = self.tank.plotter.interactor
+            p.drawImage(QRectF(pos.x(), pos.y(), ia.width(), ia.height()), q)
+            p.end()
+        img.save(self.args.shot)
+        print("screenshot ->", self.args.shot, flush=True)
+        if self.args.exit_after_shot:
+            self.close()
+
+    def closeEvent(self, e):
+        for w in (self.engine, self.fieldw, self.aux):
+            if w is not None:
+                w.stop()
+        for w in (self.engine, self.fieldw, self.aux, self.warmer):
+            if w is not None:
+                w.wait(3000)
+        if self.tank is not None:
+            self.tank.close_plotter()
+        super().closeEvent(e)
+
+
+def _legend_label(view: str, sid: str) -> str:
+    if view == "error":
+        return "|network - reference|, this frame"
+    unit = " [m/s]" if sid == "cylinder_fwd" and view == "speed" else ""
+    return {"speed": "speed", "vorticity": "vorticity", "pressure": "pressure", "divergence": "divergence, ideally 0"}.get(view, view) + unit
+
+
+def _fmt_err(err: float, headline: str) -> str:
+    return f"{100 * err:.2f} %" if "%" in headline else f"{err:.1e}"
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Live viewer for the trained PINN scenes")
+    ap.add_argument("--server", default=None, help="server URL; default: find it in WSL, then localhost")
+    ap.add_argument("--scene", default=None, help="scene to open: " + ", ".join(s.sid for s in S.SCENES))
+    ap.add_argument("--view", default=None)
+    ap.add_argument("--Re", type=float, default=None)
+    ap.add_argument("--play", action="store_true")
+    ap.add_argument("--size", type=lambda s: tuple(int(v) for v in s.lower().split("x")), default=(1600, 960))
+    ap.add_argument("--shot", default=None, help="save a screenshot of the window to this PNG")
+    ap.add_argument("--wait", type=float, default=12.0, help="seconds before the screenshot")
+    ap.add_argument("--exit-after-shot", action="store_true")
+    args = ap.parse_args(argv)
+    app = QApplication(sys.argv[:1])
+    theme.load_fonts()
+    app.setStyleSheet(theme.QSS)
+    app.setFont(theme.font("text", 13, 400))
+    w = MainWindow(args)
+    w.show()
+    sys.exit(app.exec())

@@ -27,3 +27,5 @@ data/cavity_fd/
 runs_smoke/
 runs_check/
 .impeccable/questions/
+.impeccable/review/
+.impeccable/build/

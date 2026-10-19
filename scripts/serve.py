@@ -678,7 +678,9 @@ def build_app(runs: Path, only: Optional[List[str]] = None, warm: bool = True):
             raise HTTPException(400, f"body length {len(body)} is not a multiple of {4 * dim} bytes")
         pts = np.frombuffer(body, dtype="<f4").reshape(-1, dim)
         t0 = time.time()
-        vel = s.velocity(pts, t, Re)
+        from starlette.concurrency import run_in_threadpool
+
+        vel = await run_in_threadpool(s.velocity, pts, t, Re)  # GPU work off the event loop: one scene compiling never blocks another
         return Response(content=vel.astype("<f4").tobytes(), media_type="application/octet-stream", headers={"X-Compute-Seconds": f"{time.time() - t0:.4f}"})
 
     @app.get("/bundle")
