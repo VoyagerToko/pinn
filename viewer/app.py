@@ -16,6 +16,7 @@ from viewer import scenes as S
 from viewer.bath import Bath2D
 from viewer.client import Client, find_server, start_wsl_server, wsl_path, ROOT
 from viewer.controls import PlayButton, ReBar, SceneRail, TimeBar, VerdictStamp, ViewChips
+from viewer.panel import BathPanel, Body
 from viewer.rack import Rack
 from viewer.workers import AuxWorker, FieldWorker, ParticleEngine, Warmer
 
@@ -83,45 +84,16 @@ class MainWindow(QMainWindow):
         self.rail = SceneRail()
         outer.addWidget(self.rail)
 
-        body = QHBoxLayout()
-        body.setSpacing(26)
-        outer.addLayout(body, 1)
-        left = QVBoxLayout()
-        left.setSpacing(6)
-        body.addLayout(left, 62)
-
-        head = QHBoxLayout()
-        titles = QVBoxLayout()
-        titles.setSpacing(2)
-        self.title = QLabel("Connecting")
-        self.title.setFont(theme.font("display", 32, 600))
-        self.title.setStyleSheet(f"color: {theme.INK};")
-        self.summary = QLabel("")
-        self.summary.setWordWrap(True)
-        self.summary.setFont(theme.font("text", 13.5, 400))
-        self.summary.setStyleSheet(f"color: {theme.INK_SOFT};")
-        self.summary.setMaximumWidth(720)
-        titles.addWidget(self.title)
-        titles.addWidget(self.summary)
-        titles.addStretch(1)
-        head.addLayout(titles, 1)
         self.stamp = VerdictStamp()
-        head.addWidget(self.stamp, 0, Qt.AlignTop)
-        left.addLayout(head)
-
         self.stage = QStackedWidget()
         self.bath = Bath2D()
         self.stage.addWidget(self.bath)
         self.tank = None
-        left.addWidget(self.stage, 1)
-
-        self.mode_line = QLabel("")
-        self.mode_line.setFont(theme.font("text", 12, 400))
-        self.mode_line.setStyleSheet(f"color: {theme.HAIR};")
-        left.addWidget(self.mode_line)
-
+        self.panel = BathPanel(self.stamp, self.stage)
+        self.title, self.summary, self.mode_line = self.panel.head.title, self.panel.head.summary, self.panel.mode_line
         self.rack = Rack()
-        body.addWidget(self.rack, 38)
+        self.body = Body(self.panel, self.rack)
+        outer.addWidget(self.body, 1)
 
         bottom = QHBoxLayout()
         bottom.setSpacing(20)
@@ -131,15 +103,16 @@ class MainWindow(QMainWindow):
         self.controls = QStackedWidget()
         self.controls.addWidget(self.timebar)
         self.controls.addWidget(self.rebar)
-        self.controls.setFixedHeight(56)
+        self.controls.setFixedHeight(58)
         self.chips = ViewChips()
         self.live = QLabel("")
-        self.live.setFont(theme.font("text", 12, 400, tabular=True))
+        self.live.setFont(theme.font("text", theme.SMALL, 400, tabular=True))
         self.live.setStyleSheet(f"color: {theme.HAIR};")
         self.live.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.hint = QLabel("click drops pigment, drag combs a line, space plays, 1 to 7 change scene")
-        self.hint.setFont(theme.font("text", 12, 400))
-        self.hint.setStyleSheet(f"color: {theme.HAIR};")
+        self.hint = QLabel("click drops pigment, drag combs it, space plays, 1 to 7 pick a scene")
+        self.hint.setFont(theme.font("text", theme.SMALL, 400))
+        self.hint.setStyleSheet(f"color: {theme.INK_SOFT};")
+        self.hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         bottom.addWidget(self.play, 0, Qt.AlignVCenter)
         bottom.addWidget(self.controls, 3)
         bottom.addWidget(self.chips, 0, Qt.AlignVCenter)
@@ -176,8 +149,9 @@ class MainWindow(QMainWindow):
         self.timebar.scrubbed.connect(self.scrub)
         self.rebar.changed.connect(self.set_Re)
         self.bath.dropped.connect(self.on_drop)
+        # Left and Right are not window shortcuts: a focused rail, chip row or bar uses them first (keyPressEvent below)
         for key, fn in (("Space", self.toggle_play), ("R", self.reset_dye), ("V", self.next_view), ("F", self.toggle_full), ("Escape", self.leave_full),
-                        ("S", self.start_server), ("Left", lambda: self.nudge(-1)), ("Right", lambda: self.nudge(1)), ("D", self.drop_random)):
+                        ("S", self.start_server), ("D", self.drop_random)):
             QShortcut(QKeySequence(key), self, activated=fn)
         for i, s in enumerate(S.SCENES):
             QShortcut(QKeySequence(str(i + 1)), self, activated=lambda sid=s.sid: self.select_scene(sid))
@@ -257,11 +231,11 @@ class MainWindow(QMainWindow):
         self.spec = spec
         ctl = m.get("controls", {})
         domain = [float(v) for v in m["domain"]]
-        self.rail.active = sid
-        self.rail.update()
+        self.rail.set_active(sid)
         self.title.setText(spec.name)
         self.summary.setText(m.get("summary", ""))
         self.stamp.set(spec.verdict, spec.headline, spec.headline_label, spec.pigment)
+        self.panel.set_live("")
         self.view = "pigment"
         self.chips.configure(spec.views, self.view, spec.pigment, spec.evidence)
         self.set_playing(False)
@@ -293,9 +267,12 @@ class MainWindow(QMainWindow):
                 self.tank = Tank3D()
                 self.stage.addWidget(self.tank)
             self.stage.setCurrentWidget(self.tank)
+            self.body.set_aspect(1.15)  # the tank's view of the cube
         else:
             self.stage.setCurrentWidget(self.bath)
             self.bath.domain = domain[:4]
+            self.bath.callouts = []
+            self.body.set_aspect((domain[1] - domain[0]) / (domain[3] - domain[2]))
             self.bath.field_img = None
             self.bath.pigment_img = None
             self.bath.cylinder = None
@@ -319,6 +296,7 @@ class MainWindow(QMainWindow):
         self.rack.sheet.update()
         self.rack.caption.setText(CAPTIONS.get(sid, ""))
         self.rack.chart.clear("Loading the evidence for this scene")
+        self.rack.show_coefficients(False)
         if spec.chart in ("centreline_live",):
             self.aux.want_curve(sid)
             self.aux.want_centreline(sid, self.Re)
@@ -337,12 +315,12 @@ class MainWindow(QMainWindow):
         if s is None:
             return
         if s.play_rate == 0:
-            txt = f"Steady flow at Re {self.Re:.0f}: at every update the network is asked for the velocity at each particle, and the pigment moves with it."
+            txt = f"Steady flow, Re {self.Re:.0f}: each update asks the network for every particle's velocity."
         elif s.coupled:
-            txt = ("Playing: flow time and pigment advance together, so the trails are true pathlines." if self.playing
-                   else f"Paused: the flow is frozen at t = {self.t:.2f} and the pigment follows that instant. Press space to run time.")
+            txt = ("Playing: flow time and pigment advance together; the trails are pathlines." if self.playing
+                   else f"Paused at t = {self.t:.2f}; the pigment follows this instant. Space runs time.")
         else:
-            txt = f"The pigment follows the instantaneous flow at t = {self.t:.2f}. Play or drag the time bar to move t."
+            txt = f"Pigment follows the flow at t = {self.t:.2f}; play or drag the time bar."
         self.mode_line.setText(txt)
 
     # ------------------------------------------------------------------ controls
@@ -372,7 +350,7 @@ class MainWindow(QMainWindow):
 
     def scrub(self, t: float):
         self.t = t
-        self.timebar.set_t(t)
+        self.timebar.set_t(t, animate=True)
         if self.engine:
             self.engine.set_time(t)
         self.request_field()
@@ -386,8 +364,7 @@ class MainWindow(QMainWindow):
 
     def set_Re(self, Re: float):
         self.Re = float(Re)
-        self.rebar.Re = self.Re
-        self.rebar.update()
+        self.rebar.set_Re(self.Re)
         if self.engine:
             self.engine.set_Re(self.Re)
         self.request_field()
@@ -501,7 +478,9 @@ class MainWindow(QMainWindow):
             lo, hi = self.scales[key]
         draw_view = view if view in ("pigment", "sensors") else base_view
         self.bath.field_img = render.qimage(render.to_rgb(a, draw_view, lo, hi))
-        self.bath.pigment_opacity = 1.0 if view in ("pigment", "sensors") else 0.38
+        # over a data view the pigment drops to a faint veil, so the evidence underneath reads first
+        self.bath.pigment_opacity = 1.0 if view in ("pigment", "sensors") else 0.2
+        self.bath.callouts = _corner_callouts(a) if (view == "divergence" and sid in ("cavity_ok", "cavity_hard")) else []
         self.bath.cylinder = hdr.get("cylinder")
         self.bath.legend = None if view in ("pigment", "sensors") else (render.colour_map(base_view), lo, hi, _legend_label(base_view, sid))
         if view == "sensors":
@@ -536,9 +515,9 @@ class MainWindow(QMainWindow):
         sheet.update()
         err = render.rel_l2(f)
         if err is not None:
-            self.stamp.set_live(f"this frame, live: {_fmt_err(err, self.spec.headline)} from the reference")
+            self.panel.set_live(f"live: velocity error {_fmt_err(err, self.spec.headline)}")
         else:
-            self.stamp.set_live("")
+            self.panel.set_live("")
 
     def update_sensors(self):
         pts = self.points.get("inverse")
@@ -574,8 +553,18 @@ class MainWindow(QMainWindow):
             if line is None or data is None:
                 return
             self.rack.chart.draw("centreline", data, s.pigment, Re=line[0], line=line[1])
+        elif data is not None and s.chart == "lambdas":
+            self.rack.coeffs.set(data)
+            self.rack.show_coefficients(True)
         elif data is not None:
             self.rack.chart.draw(s.chart, data, s.pigment, t=self.t, Re=self.Re)
+
+    def keyPressEvent(self, e):
+        """Arrows that no focused control used: step time on a timed scene."""
+        if e.key() in (Qt.Key_Left, Qt.Key_Right):
+            self.nudge(1 if e.key() == Qt.Key_Right else -1)
+            return
+        super().keyPressEvent(e)
 
     # ------------------------------------------------------------------ screenshots
     def take_shot(self):
@@ -618,7 +607,26 @@ def _legend_label(view: str, sid: str) -> str:
 
 
 def _fmt_err(err: float, headline: str) -> str:
-    return f"{100 * err:.2f} %" if "%" in headline else f"{err:.1e}"
+    """The live number in the measured number's own notation and precision."""
+    if "%" in headline:
+        num = headline.split()[0]
+        d = len(num.split(".")[1]) if "." in num else 0
+        return f"{100 * err:.{d}f} %"
+    return theme.sci(err)
+
+
+def _corner_callouts(div) -> list:
+    """Each top corner's largest |divergence| beside the median over the whole cavity, from this frame's grid."""
+    a = np.abs(np.asarray(div, np.float32))
+    nx, ny = a.shape
+    k = max(2, nx // 16)
+    med = float(np.nanmedian(a))
+    out = []
+    for xs, x, side in ((slice(0, k), 0.0, "right"), (slice(nx - k, nx), 1.0, "left")):
+        v = float(np.nanmax(a[xs, ny - k:]))
+        out.append({"x": x, "y": 1.0, "side": side,
+                    "text": f"corner: |div| up to {v:.2g}\nwhole cavity: median {med:.2g}"})
+    return out
 
 
 def main(argv=None):

@@ -172,7 +172,7 @@ Row A-C configs (VP formulation, second order) are about 3x cheaper per step tha
 ## 6b. Live inference server (STEP 9.5)
 
 `scripts/serve.py` loads the trained checkpoints onto the GPU once and serves fields, curves and sensor
-points over HTTP for the visual application in `app/` (binary float32 fields, JSON curves, CORS enabled):
+points over HTTP for the live viewer in `viewer/` (binary float32 fields, JSON curves, CORS enabled):
 
 ```bash
 pip install fastapi "uvicorn[standard]"
@@ -194,6 +194,27 @@ then `wsl -d Ubuntu -- bash /mnt/c/.../pinn/scripts/serve_local_wsl.sh`, which p
 Measured on an RTX 3060 Laptop (`scripts/bench_server.py`): 5,000 particle velocities in 11-14 ms (70-90 updates/s)
 via the WSL address, 64-75 ms via `localhost` (Windows' forwarding into WSL); full fields 18-215 ms per 128^2 frame
 depending on the scene, 82 ms per 48^3 3D frame; first request per grid size compiles for 20-30 s.
+
+**The live viewer.** `python -m viewer` opens a desktop window (PySide6 and pyvistaqt, native Windows env). It finds
+the server itself (the `PINN_SERVER` variable, then the WSL address, then localhost; press S to start it in WSL).
+Every frame is a network prediction. Pigment dropped with a click, or combed with a drag, is carried by the
+velocity the network predicts at each particle. The reference sits beside it at the same instant and colour
+scale, and each failure shows its evidence: the corner divergence, the lost flow rate, the missing dissipation
+peak. Options include `--scene`, `--view`, `--Re`, `--play`, `--size WxH` and `--shot file.png`.
+The visual system is in `DESIGN.md`: the "marbling bath", with one pigment per scene, procedural paper and ink,
+and a 13 px text floor.
+
+| Module | Role |
+|---|---|
+| `viewer/app.py` | The window. |
+| `viewer/panel.py` | The tray and the layout driven by the domain's aspect ratio. |
+| `viewer/bath.py` | 2D painting. |
+| `viewer/tank.py` | The 3D tank. |
+| `viewer/rack.py` | The reference sheet, charts and coefficients. |
+| `viewer/controls.py` | The rail, the stamp and the bars. |
+| `viewer/workers.py` | Particle advection and dye texture, field and curve threads. |
+| `viewer/materials.py` | Procedural paper, shadows and ink. |
+| `viewer/theme.py` | Palette, OKLab maps and fonts. |
 
 ## 7. Deviations from the handbook and things to know
 

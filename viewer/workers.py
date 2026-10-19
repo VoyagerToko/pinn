@@ -25,18 +25,36 @@ CACHE = ROOT / "runs" / "_viewer_cache"
 
 
 def scene_colors(spec: S.SceneSpec) -> np.ndarray:
-    """Pigment table for a scene: 0 its own pigment, 1 ink, 2.. the drop pigments in drop order."""
-    hexes = [spec.pigment, theme.INK] + [theme.PIGMENTS[n] for n in theme.DROP_ORDER]
-    return np.stack([theme.hex_rgb(h) for h in hexes]).astype(np.float32)
+    """Pigment table for a scene: 0 its own pigment, 1 its partner, 2.. the drop pigments in drop order.
+
+    In the 2D baths the partner is ink. In the 3D tank, where points are seen through each other, the partner is
+    the scene's pigment let down with paper, so the tank reads as one pigment in two strengths rather than black.
+    """
+    own = theme.hex_rgb(spec.pigment)
+    partner = theme.hex_rgb(theme.INK) if spec.dims == 2 else own * 0.45 + theme.hex_rgb(theme.PAPER) * 0.55
+    rest = [theme.hex_rgb(theme.PIGMENTS[n]) for n in theme.DROP_ORDER]
+    return np.stack([own, partner] + rest).astype(np.float32)
 
 
 class PigmentRaster:
-    """Pigment trails as an ARGB raster: density splatted with bincount, softened, composited like ink on size."""
+    """Pigment as an ARGB dye texture.
+
+    Each step splats the particles' recent trails (bincount), adds them into a texture that keeps a decaying memory of
+    where pigment has been, softens it at two scales (a fine line and a wider wash, so thinly seeded water still reads
+    as dye rather than dots) and composites the pigments like ink on size.
+    """
 
     K = 10
+    DECAY = 0.90   # per step: the texture remembers the last ~10 steps, so trails lie down as continuous bands
+    GAIN = 2.6
+    WASH = 1.1     # weight of the wide blur
 
     def __init__(self):
         self.W = self.H = 0
+        self.acc: Optional[np.ndarray] = None
+
+    def reset(self):
+        self.acc = None
 
     def render(self, hist: np.ndarray, active: np.ndarray, pig: np.ndarray, domain, colors: np.ndarray, periodic: bool) -> Optional[np.ndarray]:
         W, H = self.W, self.H
@@ -67,13 +85,21 @@ class PigmentRaster:
         hin = active & (hx >= 0) & (hx < W) & (hy >= 0) & (hy < H)
         dens += np.bincount(pig[hin].astype(np.int64) * (W * H) + hy[hin] * W + hx[hin], weights=np.full(int(hin.sum()), 1.1), minlength=P * W * H)
         d = dens.reshape(P, H, W).astype(np.float32)
+        if self.acc is None or self.acc.shape != d.shape:
+            self.acc = d
+        else:
+            self.acc *= self.DECAY
+            self.acc += (1.0 - self.DECAY) * d
+            self.acc[self.acc < 1e-4] = 0.0
+        d = self.acc
         used = [p for p in range(P) if d[p].any()]
         if not used:
             return np.zeros((H, W, 4), np.uint8)
         from scipy.ndimage import gaussian_filter
 
-        d = np.stack([gaussian_filter(d[p], 0.8, mode="wrap" if periodic else "constant") for p in used])
-        alpha = 1.0 - np.exp(-2.2 * d)                       # (U, H, W)
+        mode = "wrap" if periodic else "constant"
+        d = np.stack([gaussian_filter(d[p], 0.7, mode=mode) + self.WASH * gaussian_filter(d[p], 2.0, mode=mode) for p in used])
+        alpha = 1.0 - np.exp(-self.GAIN * d)                 # (U, H, W)
         A = 1.0 - np.prod(1.0 - alpha, axis=0)               # coverage
         cs = colors[used]                                     # (U, 3)
         num = np.einsum("uhw,uc->hwc", alpha, cs)
@@ -146,7 +172,8 @@ class ParticleEngine(QThread):
                     if k == "scene":
                         spec, domain, t, Re, trange = c[1], list(c[2]), float(c[3]), float(c[4]), c[5]
                         pos, pig, active = S.initial_dye(spec, domain, self.rng)
-                        K = PigmentRaster.K if spec.dims == 2 else 4
+                        self.raster.reset()
+                        K = PigmentRaster.K if spec.dims == 2 else 6
                         hist = np.repeat(pos[None], K, axis=0)
                         colors = scene_colors(spec)
                         ring = 0
@@ -159,6 +186,7 @@ class ParticleEngine(QThread):
                         playing = bool(c[1])
                     elif k == "reset" and spec is not None:
                         pos, pig, active = S.initial_dye(spec, domain, self.rng)
+                        self.raster.reset()
                         hist = np.repeat(pos[None], hist.shape[0], axis=0)
                         ring = 0
                     elif k == "drop" and spec is not None:
@@ -172,6 +200,7 @@ class ParticleEngine(QThread):
                         hist[:, idx] = pts[:m][None]
                     elif k == "size":
                         self.raster.W, self.raster.H = int(c[1]), int(c[2])
+                        self.raster.reset()
             except queue.Empty:
                 pass
             if spec is None:
@@ -231,6 +260,7 @@ class ParticleEngine(QThread):
                 if trange is not None and t > trange[1]:
                     t = trange[0]
                     pos, pig, active = S.initial_dye(spec, domain, self.rng)
+                    self.raster.reset()
                     hist = np.repeat(pos[None], hist.shape[0], axis=0)
             ema_ms = 0.85 * ema_ms + 0.15 * (c1 + c2) * 1e3 / 2 if ema_ms else (c1 + c2) * 1e3 / 2
             hz = 1.0 / max(wall, 1e-3)

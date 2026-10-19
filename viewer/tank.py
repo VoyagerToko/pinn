@@ -17,7 +17,7 @@ class Tank3D(QWidget):
 
         self.pv = pv
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(8, 8, 14, 16)
+        lay.setContentsMargins(0, 0, 0, 0)  # the tray (panel.BathPanel) frames the tank
         self.plotter = QtInteractor(self, auto_update=False)
         lay.addWidget(self.plotter.interactor)
         pl = self.plotter

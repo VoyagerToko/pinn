@@ -84,7 +84,7 @@ REGISTRY: Dict[str, Dict] = {
         "status": "failed",
         "gate": "Ghia centreline error < 2% at Re = 1000",
         "measured": "u 19.8%, v 20.2%",
-        "summary": "Same problem with the lid velocity imposed exactly. The exact lid and the exact side walls are incompatible with continuity in the two top corners, so divergence is pinned at ~0.04 there and the main vortex comes out too weak.",
+        "summary": "The same lid, with its velocity imposed exactly. The exact lid and side walls cannot satisfy continuity in the two top corners, so the continuity residual keeps a floor (mean square about 0.04) and the vortex comes out too weak.",
         "reference": "finite-difference solution (N = 512)",
         "controls": {"Re": [100, 400, 1000]},
     },

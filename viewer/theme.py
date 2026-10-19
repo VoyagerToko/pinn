@@ -21,7 +21,11 @@ PAPER = "#e6e3d6"         # a pulled sheet
 STONE = "#8d927f"         # obstacles and outside-the-fluid regions
 INK = "#141414"
 INK_SOFT = "#3d4438"      # secondary text, tinted from the size (6:1 on SIZE)
-HAIR = "#59604f"          # hairline rules and live-derived numbers (4.6:1 on SIZE)
+HAIR = "#4b5243"          # hairline rules and live-derived numbers (5.0:1 on SIZE, 5.6:1 on RIM)
+MADDER_TEXT = "#8a2232"   # madder deepened for text and the failed stamp (5.5:1 on SIZE)
+
+SMALL = 13                # the smallest text anywhere in the window, in px (a projector across a room)
+MOTION_MS = 200           # every state change eases out over this long (150-250 ms in the contract)
 
 # the marbler's pigments, one per scene (spot colour) in benchmark order
 PIGMENTS: Dict[str, str] = {
@@ -180,6 +184,12 @@ def font(kind: str = "text", px: float = 13, weight: int = 400, tabular: bool = 
     return f
 
 
+def sci(v: float, digits: int = 1) -> str:
+    """One notation for every small number: 4.2e-5 (no zero-padded exponent), both measured and live."""
+    m, e = f"{v:.{digits}e}".split("e")
+    return f"{m}e{int(e)}"
+
+
 def qcolor(h: str, alpha: float = 1.0):
     from PySide6.QtGui import QColor
 
@@ -191,7 +201,12 @@ def qcolor(h: str, alpha: float = 1.0):
 def mpl_style() -> Dict:
     return {
         "font.family": _FAMILIES.get("text", "sans-serif"),
-        "font.size": 9.5,
+        "font.size": 9.5,            # points at 100 dpi: 13 px
+        "mathtext.fontset": "custom",  # log-axis exponents in the same face as every other figure
+        "mathtext.rm": _FAMILIES.get("text", "sans-serif"),
+        "mathtext.it": _FAMILIES.get("text", "sans-serif"),
+        "mathtext.bf": _FAMILIES.get("text", "sans-serif"),
+        "mathtext.default": "regular",
         "axes.facecolor": PAPER,
         "figure.facecolor": SIZE,
         "axes.edgecolor": HAIR,

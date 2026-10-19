@@ -1,7 +1,8 @@
-"""The bath: the tray of size where the network's current carries the pigment (2D scenes).
+"""The bath: the water in the tray, where the network's current carries the pigment (2D scenes).
 
 Painted with QPainter. The field image and the pigment raster are both produced off the UI thread; this widget
-only composes them, draws the obstacles and the rim states, and turns clicks and drags into pigment.
+only composes them, draws the obstacles, the measured call-outs and the states, and turns clicks and drags into
+pigment. The tray itself (lip, shadow, wet edge) is painted by panel.BathPanel around this widget.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ class Bath2D(QWidget):
     dropped = Signal(object)       # (M, 2) points in domain coordinates
     raster_size = Signal(int, int)  # pigment raster resolution wanted by the painter
 
-    MARGIN = 18
+    MARGIN = 10
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -35,6 +36,7 @@ class Bath2D(QWidget):
         self.state = "connecting"  # connecting | compiling | live | offline
         self.state_text = ""
         self.legend = None  # (lut, lo, hi, label)
+        self.callouts: List[dict] = []  # {"x", "y", "text", "side"}: measured values pinned to a place in the flow
         self._drag: List[QPointF] = []
         self._press = None
         self._sweep = 0.0
@@ -43,12 +45,12 @@ class Bath2D(QWidget):
         self._timer.start(40)
 
     # ---- geometry ----
-    LEGEND = 30
+    LEGEND = 28
 
     def domain_rect(self) -> QRectF:
         """The flow domain, as large as the widget allows at its true aspect ratio."""
         m = self.MARGIN
-        avail = QRectF(self.rect()).adjusted(2 + m, 2 + m, -6 - m, -8 - m - self.LEGEND)
+        avail = QRectF(self.rect()).adjusted(m, m, -m, -m - self.LEGEND)
         x0, x1, y0, y1 = self.domain[:4]
         aspect = (x1 - x0) / max(y1 - y0, 1e-9)
         w, h = avail.width(), avail.height()
@@ -57,11 +59,6 @@ class Bath2D(QWidget):
             return QRectF(avail.left() + (w - nw) / 2, avail.top(), nw, h)
         nh = w / aspect
         return QRectF(avail.left(), avail.top() + (h - nh) / 2, w, nh)
-
-    def tray_rect(self) -> QRectF:
-        """The tray hugs the domain: the size is only as wide as the water."""
-        m = self.MARGIN
-        return self.domain_rect().adjusted(-m, -m, m, m + self.LEGEND)
 
     def to_domain(self, p: QPointF) -> Optional[np.ndarray]:
         r = self.domain_rect()
@@ -133,17 +130,6 @@ class Bath2D(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
-        tray = self.tray_rect()
-        # the tray: offset soft shadow, deeper water at the edge, wet size inside
-        for i, a in enumerate((0.10, 0.06, 0.03)):
-            p.setPen(Qt.NoPen)
-            p.setBrush(theme.qcolor(theme.INK, a))
-            p.drawRoundedRect(tray.translated(1.5 + i, 3 + 1.5 * i), 14, 14)
-        p.setBrush(theme.qcolor(theme.SIZE_DEEP))
-        p.drawRoundedRect(tray, 14, 14)
-        inner = tray.adjusted(6, 6, -6, -6)
-        p.setBrush(theme.qcolor(theme.SIZE_WET))
-        p.drawRoundedRect(inner, 10, 10)
         r = self.domain_rect()
         if self.field_img is not None:
             p.drawImage(r, self.field_img)
@@ -173,27 +159,65 @@ class Bath2D(QWidget):
                 path.lineTo(q)
             p.setPen(QPen(theme.qcolor(theme.INK, 0.45), 1.5, Qt.DashLine))
             p.drawPath(path)
-        self._paint_legend(p, tray)
+        self._paint_callouts(p, r)
+        self._paint_legend(p, r)
         self._paint_state(p, r)
         p.end()
 
-    def _paint_legend(self, p: QPainter, tray: QRectF):
+    def _paint_callouts(self, p: QPainter, r: QRectF):
+        """A ring on the place, a leader into the water, and the measured value on a slip of paper."""
+        if not self.callouts:
+            return
+        f = theme.font("text", theme.SMALL, 600, tabular=True)
+        p.setFont(f)
+        fm = p.fontMetrics()
+        for c in self.callouts:
+            at = self.to_px(c["x"], c["y"])
+            at = QPointF(min(max(at.x(), r.left()), r.right()), min(max(at.y(), r.top()), r.bottom()))
+            sx = 1 if c.get("side", "right") == "right" else -1
+            elbow = QPointF(at.x() + sx * 30, at.y() + 34)
+            lines = c["text"].splitlines()
+            tw = max(fm.horizontalAdvance(s) for s in lines) + 16
+            th = fm.height() * len(lines) + 10
+            box = QRectF(elbow.x() if sx > 0 else elbow.x() - tw, elbow.y(), tw, th)
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(theme.qcolor(theme.PAPER, 0.9), 3.2))  # a pale halo keeps the rule legible on any colour
+            p.drawEllipse(at, 9, 9)
+            p.drawLine(at + QPointF(sx * 6.4, 6.4), elbow)
+            p.setPen(QPen(theme.qcolor(theme.INK), 1.4))
+            p.drawEllipse(at, 9, 9)
+            p.drawLine(at + QPointF(sx * 6.4, 6.4), elbow)
+            p.setPen(QPen(theme.qcolor(theme.INK, 0.55), 0.8))
+            p.setBrush(theme.qcolor(theme.PAPER, 0.95))
+            p.drawRect(box)
+            p.setPen(theme.qcolor(theme.INK))
+            for i, s in enumerate(lines):
+                p.drawText(QPointF(box.left() + 8, box.top() + 5 + fm.ascent() + i * fm.height()), s)
+
+    def _paint_legend(self, p: QPainter, r: QRectF):
         if self.legend is None:
             return
         lut, lo, hi, label = self.legend
+        p.setFont(theme.font("text", theme.SMALL, 500, tabular=True))
+        fm = p.fontMetrics()
+        lo_s, hi_s = _fmt(lo), _fmt(hi)
         w, h = 180.0, 8.0
-        x, y = tray.left() + self.MARGIN + 4, tray.bottom() - self.MARGIN - 4
-        img = QImage(np.ascontiguousarray(lut[None, :, :]).data, lut.shape[0], 1, 3 * lut.shape[0], QImage.Format_RGB888).copy()
-        p.drawImage(QRectF(x, y - h, w, h), img)
-        p.setPen(QPen(theme.qcolor(theme.INK, 0.5), 0.8))
-        p.drawRect(QRectF(x, y - h, w, h))
-        p.setFont(theme.font("text", 11, 500, tabular=True))
-        p.setPen(theme.qcolor(theme.INK_SOFT))
-        p.drawText(QPointF(x, y - h - 5), _fmt(lo))
-        t = _fmt(hi)
-        p.drawText(QPointF(x + w - p.fontMetrics().horizontalAdvance(t), y - h - 5), t)
+        y = r.bottom() + self.LEGEND - 8          # text baseline; the bar sits on it, centred on the figures
+        x = r.left()
         p.setPen(theme.qcolor(theme.INK))
-        p.drawText(QPointF(x + w + 12, y - 0.5), label)
+        p.drawText(QPointF(x, y), lo_s)          # the scale reads: lo [bar] hi   label
+        bx = x + fm.horizontalAdvance(lo_s) + 8
+        img = QImage(np.ascontiguousarray(lut[None, :, :]).data, lut.shape[0], 1, 3 * lut.shape[0], QImage.Format_RGB888).copy()
+        bar = QRectF(bx, y - fm.ascent() / 2 - h / 2 + 1, w, h)
+        p.drawImage(bar, img)
+        p.setPen(QPen(theme.qcolor(theme.INK, 0.5), 0.8))
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(bar)
+        x2 = bar.right() + 8
+        p.setPen(theme.qcolor(theme.INK))
+        p.drawText(QPointF(x2, y), hi_s)
+        p.setPen(theme.qcolor(theme.INK_SOFT))
+        p.drawText(QPointF(x2 + fm.horizontalAdvance(hi_s) + 16, y), label)
 
     def _paint_state(self, p: QPainter, r: QRectF):
         if self.state == "live":
@@ -227,5 +251,5 @@ def _fmt(v: float) -> str:
     if a == 0:
         return "0"
     if a < 1e-2 or a >= 1e4:
-        return f"{v:.1e}"
+        return theme.sci(v)
     return f"{v:.3g}"
