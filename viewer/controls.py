@@ -14,7 +14,7 @@ from PySide6.QtGui import QBrush, QFont, QFontMetricsF, QImage, QPainter, QPaint
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from viewer import materials, theme
-from viewer.scenes import SCENES
+from viewer.scenes import SCENES, TABS, scenes_in
 
 
 NBSP = "\u00a0"
@@ -144,23 +144,32 @@ class SceneRail(KeyboardFocus, QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.StrongFocus)
         self.setAccessibleName("Scenes")
-        self.active = SCENES[0].sid
+        self.scenes = scenes_in("bench")
+        self.note = ""
+        self.active = self.scenes[0].sid
         self.ready: Dict[str, str] = {s.sid: "waiting" for s in SCENES}
         self.available = {s.sid for s in SCENES}
         self.hover = None
         self.strike = Tween(self)
 
+    def set_scenes(self, scenes, note: str = ""):
+        """Show one tab's scenes; ``note`` fills the rail's free width (the real-world tab has one scene)."""
+        self.scenes, self.note = list(scenes), note
+        self.update()
+
     def set_active(self, sid: str, animate: bool = True):
         self.active = sid
-        self.strike.to(next(i for i, s in enumerate(SCENES) if s.sid == sid), animate)
+        idx = next((i for i, s in enumerate(self.scenes) if s.sid == sid), None)
+        if idx is not None:
+            self.strike.to(idx, animate)
         self.update()
 
     def _cells(self) -> List[QRectF]:
-        w = self.width() / len(SCENES)
-        return [QRectF(i * w, 0, w, self.height()) for i in range(len(SCENES))]
+        w = self.width() / 7  # one width for every tab, so a drop never moves when the tab changes
+        return [QRectF(i * w, 0, w, self.height()) for i in range(len(self.scenes))]
 
     def mouseMoveEvent(self, e):
-        h = next((s.sid for s, r in zip(SCENES, self._cells()) if r.contains(e.position())), None)
+        h = next((s.sid for s, r in zip(self.scenes, self._cells()) if r.contains(e.position())), None)
         if h != self.hover:
             self.hover = h
             self.setCursor(Qt.PointingHandCursor if h else Qt.ArrowCursor)
@@ -171,13 +180,13 @@ class SceneRail(KeyboardFocus, QWidget):
         self.update()
 
     def mousePressEvent(self, e):
-        for s, r in zip(SCENES, self._cells()):
+        for s, r in zip(self.scenes, self._cells()):
             if r.contains(e.position()) and s.sid in self.available:
                 self.chosen.emit(s.sid)
 
     def keyPressEvent(self, e):
         if e.key() in (Qt.Key_Left, Qt.Key_Right):
-            ids = [s.sid for s in SCENES if s.sid in self.available]
+            ids = [s.sid for s in self.scenes if s.sid in self.available]
             if self.active in ids:
                 i = (ids.index(self.active) + (1 if e.key() == Qt.Key_Right else -1)) % len(ids)
                 self.chosen.emit(ids[i])
@@ -189,7 +198,7 @@ class SceneRail(KeyboardFocus, QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         cells = self._cells()
-        for i, (s, r) in enumerate(zip(SCENES, cells)):
+        for i, (s, r) in enumerate(zip(self.scenes, cells)):
             on = s.sid == self.active
             avail = s.sid in self.available
             state = self.ready.get(s.sid, "waiting")
@@ -221,14 +230,19 @@ class SceneRail(KeyboardFocus, QWidget):
             p.setPen(theme.qcolor(theme.INK_SOFT if s.verdict != "failed" else theme.MADDER_TEXT))
             p.drawText(QRectF(x, r.top() + 32, r.width() - 60, 18), Qt.AlignLeft | Qt.AlignVCenter, word)
             p.setOpacity(1.0)
+        if self.note and cells:
+            p.setFont(theme.font("text", 14, 400))
+            p.setPen(theme.qcolor(theme.INK_SOFT))
+            x0 = cells[-1].right() + 24
+            p.drawText(QRectF(x0, 8, self.width() - x0, self.height() - 16), Qt.AlignLeft | Qt.AlignVCenter | Qt.TextWordWrap, self.note)
         # the strike: one rule in the active pigment that slides to the chosen drop
-        if cells:
+        if cells and any(s.sid == self.active for s in self.scenes):
             k = self.strike.get(0.0)
             i0 = int(math.floor(k))
             f = k - i0
             w = cells[0].width()
             x = k * w
-            colour = next(s.pigment for s in SCENES if s.sid == self.active)
+            colour = next(s.pigment for s in self.scenes if s.sid == self.active)
             p.setPen(Qt.NoPen)
             p.setBrush(theme.qcolor(colour))
             p.drawRect(QRectF(x + 10, self.height() - 6, w - 20, 3))
@@ -236,6 +250,65 @@ class SceneRail(KeyboardFocus, QWidget):
                 focus_ring(p, QRectF(x + 4, 3, w - 8, self.height() - 12), 6)
         p.setPen(QPen(theme.qcolor(theme.INK, 0.25), 1))
         p.drawLine(QPointF(0, self.height() - 1), QPointF(self.width(), self.height() - 1))
+        p.end()
+
+
+class TabStrip(KeyboardFocus, QWidget):
+    """Two tabs over the rail: the benchmarks, and the real-world use case. The active one in ink, underlined."""
+
+    chosen = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(30)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setAccessibleName("Tabs")
+        self.setCursor(Qt.PointingHandCursor)
+        self.active = TABS[0][0]
+        self.ux = Tween(self)
+        self.uw = Tween(self)
+
+    def _boxes(self):
+        boxes, x = [], 0.0
+        for key, label in TABS:
+            w = QFontMetricsF(theme.font("text", 15, 650)).horizontalAdvance(label) + 4
+            boxes.append((key, label, QRectF(x, 0, w, self.height())))
+            x += w + 30
+        return boxes
+
+    def set_active(self, key: str, animate: bool = True):
+        self.active = key
+        box = next(r for k, _, r in self._boxes() if k == key)
+        self.ux.to(box.left(), animate)
+        self.uw.to(box.width(), animate)
+        self.update()
+
+    def mousePressEvent(self, e):
+        for k, _, r in self._boxes():
+            if r.contains(e.position()):
+                self.chosen.emit(k)
+
+    def keyPressEvent(self, e):
+        if e.key() in (Qt.Key_Left, Qt.Key_Right):
+            keys = [k for k, _ in TABS]
+            self.chosen.emit(keys[(keys.index(self.active) + (1 if e.key() == Qt.Key_Right else -1)) % len(keys)])
+            e.accept()
+            return
+        super().keyPressEvent(e)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        for k, label, r in self._boxes():
+            on = k == self.active
+            p.setFont(theme.font("text", 15, 650 if on else 500))
+            p.setPen(theme.qcolor(theme.INK if on else theme.INK_SOFT))
+            p.drawText(r.adjusted(0, 0, 0, -6), Qt.AlignLeft | Qt.AlignVCenter, label)
+            if on and self.ring_visible():
+                focus_ring(p, r.adjusted(-6, 1, 6, -3))
+        p.setPen(Qt.NoPen)
+        p.setBrush(theme.qcolor(theme.INK))
+        p.drawRect(QRectF(self.ux.get(0.0), self.height() - 5, self.uw.get(0.0), 2))
         p.end()
 
 
@@ -257,14 +330,15 @@ class VerdictStamp(QWidget):
         self.word = ""
         self.number = ""
         self.label = ""
+        self.source = "measured, STATUS.md"
         self.pigment = theme.INK
         self._imp: Optional[QImage] = None
         self.press = Tween(self, 220)
         self.press.to(1.0, animate=False)
 
-    def set(self, word: str, number: str, label: str, pigment: str):
-        changed = (word, number, label) != (self.word, self.number, self.label)
-        self.word, self.number, self.label, self.pigment = word, number, label, pigment
+    def set(self, word: str, number: str, label: str, pigment: str, source: str = "measured, STATUS.md"):
+        changed = (word, number, label, source) != (self.word, self.number, self.label, getattr(self, "source", None))
+        self.word, self.number, self.label, self.pigment, self.source = word, number, label, pigment, source
         self._imp = None
         if changed:
             self.press.v = 0.0
@@ -305,7 +379,7 @@ class VerdictStamp(QWidget):
         for i, s in enumerate(lines[:2]):
             p.drawText(QPointF(x0, r.top() + 63 + i * 16.5), s)
         p.setFont(theme.font("text", theme.SMALL, 650))
-        p.drawText(QPointF(x0, r.top() + 97), "measured, STATUS.md")
+        p.drawText(QPointF(x0, r.top() + 97), self.source)
         p.setCompositionMode(QPainter.CompositionMode_DestinationIn)
         p.drawImage(QRectF(0, 0, self.IMP_W, self.IMP_H), materials.ink_texture(w, h))
         p.end()
@@ -398,12 +472,13 @@ class TimeBar(KeyboardFocus, QWidget):
         self.setAccessibleName("Time")
         self.t0, self.t1, self.t = 0.0, 1.0, 0.0
         self.unit = ""
+        self.scale = 1.0  # displayed value = t * scale (e.g. seconds of a heartbeat)
         self.pigment = theme.INK
         self.head = Tween(self)
         self.setCursor(Qt.PointingHandCursor)
 
-    def set_range(self, t0, t1, unit="", pigment=theme.INK):
-        self.t0, self.t1, self.unit, self.pigment = float(t0), float(t1), unit, pigment
+    def set_range(self, t0, t1, unit="", pigment=theme.INK, scale: float = 1.0):
+        self.t0, self.t1, self.unit, self.pigment, self.scale = float(t0), float(t1), unit, pigment, float(scale)
         self.t = self.t0
         self.head.to(0.0, animate=False)
         self.update()
@@ -449,11 +524,12 @@ class TimeBar(KeyboardFocus, QWidget):
         p.setBrush(theme.qcolor(theme.INK, 0.35))
         p.drawRect(tr)
         span = self.t1 - self.t0
-        step = _nice_step(span / 8)
+        k = self.scale
+        step = _nice_step(span * k / 8)  # ticks in displayed units
         p.setFont(theme.font("text", theme.SMALL, 500, tabular=True))
-        v = math.ceil(self.t0 / step) * step
-        while v <= self.t1 + 1e-9:
-            x = tr.left() + (v - self.t0) / span * tr.width()
+        v = math.ceil(self.t0 * k / step) * step
+        while v <= self.t1 * k + 1e-9:
+            x = tr.left() + (v / k - self.t0) / span * tr.width()
             p.setPen(QPen(theme.qcolor(theme.INK, 0.45), 1))
             p.drawLine(QPointF(x, tr.top() - 4), QPointF(x, tr.top() + 6))
             p.setPen(theme.qcolor(theme.INK_SOFT))
@@ -467,7 +543,7 @@ class TimeBar(KeyboardFocus, QWidget):
         p.drawPath(blot(QPointF(x, tr.top() + 1), 7.5, seed=91))
         p.setFont(theme.font("text", 14, 600, tabular=True))
         p.setPen(theme.qcolor(theme.INK))
-        label = f"t = {_fmt_t(self.t, 2)}{(' ' + self.unit) if self.unit else ''}"
+        label = f"t = {_fmt_t(self.t * self.scale, 2)}{(' ' + self.unit) if self.unit else ''}"
         lw = p.fontMetrics().horizontalAdvance(label)
         lx = min(max(x - lw / 2, 0), self.width() - lw)
         p.drawText(QPointF(lx, 16), label)

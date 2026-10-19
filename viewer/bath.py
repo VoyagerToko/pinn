@@ -37,6 +37,7 @@ class Bath2D(QWidget):
         self.state_text = ""
         self.legend = None  # (lut, lo, hi, label)
         self.callouts: List[dict] = []  # {"x", "y", "text", "side"}: measured values pinned to a place in the flow
+        self.walls = None  # (x, h): a vessel wall at y = +-h(x), drawn as an ink line
         self._drag: List[QPointF] = []
         self._press = None
         self._sweep = 0.0
@@ -143,6 +144,15 @@ class Bath2D(QWidget):
             p.setBrush(theme.qcolor(theme.STONE))
             p.setPen(QPen(theme.qcolor(theme.INK, 0.8), 1.2))
             p.drawEllipse(c, rr, rr)
+        if self.walls is not None:
+            xs, hs = self.walls
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(theme.qcolor(theme.INK, 0.85), 1.4))
+            for sgn in (1.0, -1.0):
+                path = QPainterPath(self.to_px(float(xs[0]), sgn * float(hs[0])))
+                for xv, hv in zip(xs[1:], hs[1:]):
+                    path.lineTo(self.to_px(float(xv), sgn * float(hv)))
+                p.drawPath(path)
         if self.sensors is not None and len(self.sensors):
             p.setPen(QPen(theme.qcolor(theme.INK, 0.85), 1.0))
             p.setBrush(theme.qcolor(theme.PAPER, 0.9))
@@ -221,6 +231,17 @@ class Bath2D(QWidget):
 
     def _paint_state(self, p: QPainter, r: QRectF):
         if self.state == "live":
+            return
+        if self.state == "untrained":  # a quiet slip in the corner: the scan below is real data, not a placeholder
+            p.setFont(theme.font("text", theme.SMALL, 600))
+            text = "network not trained yet: this is the scan it will learn from"
+            fm = p.fontMetrics()
+            box = QRectF(r.left() + 8, r.top() + 8, fm.horizontalAdvance(text) + 16, fm.height() + 8)
+            p.setBrush(theme.qcolor(theme.PAPER, 0.94))
+            p.setPen(QPen(theme.qcolor(theme.INK, 0.4), 0.8))
+            p.drawRect(box)
+            p.setPen(theme.qcolor(theme.INK))
+            p.drawText(box, Qt.AlignCenter, text)
             return
         # a thin pigment sweep along the top of the domain while the GPU compiles or the server is reached
         if self.state in ("compiling", "connecting"):

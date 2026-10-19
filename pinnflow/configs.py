@@ -173,6 +173,23 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         t.data_batch_size = 2048
         t.res_batch_size = 4096
         w.init_weights = ml_collections.ConfigDict({"u_data": 1.0, "v_data": 1.0, "r_u": 1.0, "r_v": 1.0})
+    elif benchmark == "stenosis_mri":
+        # real-world use case: pressure across a stenosis from MRI-like velocity data (pinnflow/vessel.py)
+        p.data_dir = None  # default data/stenosis (scripts/make_stenosis_data.py)
+        p.sub_samples = 4  # network points averaged per MRI voxel and phase window
+        p.hard_walls = True  # exact no-slip on the segmented wall, learned flow rate Q(t)
+        p.p_scale = 10.0  # pressure output scale: about 1/2 of the throat speed squared
+        p.flow_harmonics = 6
+        c.arch.out_dim = 2  # (psi, p): exactly incompressible
+        c.arch.num_layers = 6
+        c.arch.hidden_dim = 192
+        c.arch.fourier_emb = ml_collections.ConfigDict({"embed_scale": 3.0, "embed_dim": 192})
+        t.max_steps = 80000
+        t.lbfgs_steps = 5000
+        t.data_batch_size = 1024
+        t.res_batch_size = 4096
+        t.bc_batch_size = 1024
+        w.init_weights = ml_collections.ConfigDict({"u_data": 1.0, "v_data": 1.0, "r_u": 1.0, "r_v": 1.0, "u_wall": 1.0, "v_wall": 1.0, "p_anchor": 1.0})
     elif benchmark == "deeponet_cavity":
         p.Re_min = 100.0
         p.Re_max = 1000.0
@@ -259,7 +276,7 @@ def get_config(benchmark: str, ablation: str = "G", overrides=None) -> ml_collec
         row = "G"  # the SPINN row only exists for the 3D case
     if benchmark == "tgv3d":
         row = "H"  # Benchmark D is only run with the full 3D configuration
-    if benchmark not in ("cylinder_inverse", "deeponet_cavity"):
+    if benchmark not in ("cylinder_inverse", "deeponet_cavity", "stenosis_mri"):
         _apply_ablation(c, benchmark, row)
     c.name = f"{benchmark}_{row}"
     if overrides:

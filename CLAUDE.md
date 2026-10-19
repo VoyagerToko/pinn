@@ -35,6 +35,9 @@ train something or change behaviour.
 - Always `export XLA_PYTHON_CLIENT_PREALLOCATE=false`. First compile of a run takes minutes
   (XLA autotuning); `XLA_FLAGS=--xla_gpu_autotune_level=2` shortens it.
 - Data and reference repos are not committed: `bash scripts/download_data.sh` recreates them.
+- Real-world use case (README 6c): `python scripts/make_stenosis_data.py` makes `data/stenosis/` (CFD truth plus a
+  synthetic MRI scan), then `--benchmark stenosis_mri` trains it. On this laptop's WSL GPU,
+  `scripts/train_local_wsl.sh <benchmark> [args]` trains detached (setsid) and restarts the live server at the end.
 
 ## Conventions and gotchas
 

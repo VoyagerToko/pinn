@@ -156,6 +156,7 @@ class EvidenceChart(QWidget):
         lay.addWidget(self.canvas)
         self.cursor = None
         self.kind = None
+        self._time_scale = 1.0
 
     def clear(self, message: str = ""):
         import matplotlib
@@ -223,6 +224,22 @@ class EvidenceChart(QWidget):
                 ax.text(st[-1] + 0.12, 1.02, "mass conserved", ha="right", va="bottom", color=ink, fontsize=9.5)
                 ax.set_ylim(0, 1.25)
                 ax.set_xlabel(f"x [m]   (t = {ts[i]:.2f} s)")
+            elif kind == "pressure_drop":
+                ks = float(data.get("period_s", 1.0)) / float(data.get("period", 1.0))  # flow time -> seconds
+                self._time_scale = ks
+                ax = self._ax("Pressure drop across the stenosis, one heartbeat", pad=30)
+                tt = np.asarray(data["t"]) * ks
+                ax.plot(tt, data["dp_true"], color=ink, lw=1.7, label="CFD truth", zorder=3)
+                if data.get("dp_pinn"):
+                    ax.plot(np.asarray(data["t_pinn"]) * ks, data["dp_pinn"], color=pigment, lw=2.0, label="network, from the scan", zorder=4)
+                ax.plot(np.asarray(data["t_phase"]) * ks, data["dp_bernoulli"], color=soft, lw=1.1, ls=(0, (4, 3)), marker="o", ms=3,
+                        mfc=theme.PAPER, label="simplified Bernoulli, 4 v_peak^2", zorder=2)
+                ax.set_xlabel("time in the heartbeat [s]")
+                ax.set_ylabel("mmHg")
+                ax.margins(x=0.02)
+                ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=3, fontsize=9.5, labelcolor=soft,
+                          handlelength=1.8, columnspacing=1.4, borderaxespad=0.2)
+                self.cursor = self._cursor(ax, (t or 0.0) * ks)
             elif kind == "dissipation":
                 ax = self._ax("Kinetic-energy dissipation", pad=30)
                 ax.plot(data["ref"]["t"], data["ref"]["dissipation_dns"], color=ink, lw=1.6, label="DNS reference", zorder=3)
@@ -242,7 +259,8 @@ class EvidenceChart(QWidget):
 
     def move_cursor(self, t: float):
         if self.cursor is not None:
-            self.cursor.set_xdata([t, t])
+            ts = t * self._time_scale if self.kind == "pressure_drop" else t
+            self.cursor.set_xdata([ts, ts])
             self.canvas.draw_idle()
 
 

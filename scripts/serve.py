@@ -17,6 +17,9 @@ Endpoints (interactive docs at /docs):
     POST /velocity/{model}?t=&Re=&dim=            raw float32 points (N, dim) in, predicted velocities (N, dim) out
     GET /bundle                                   tar.gz of every scene's checkpoints + references (extract at repo root)
 
+The "stenosis" scene (the real-world use case) is served from its dataset even before its network is trained: the
+CFD truth and the MRI-like scan come back from /field, /velocity answers 409, and /models says trained = false.
+
 The binary field layout is documented in :func:`pack_fields`.
 """
 from __future__ import annotations
@@ -46,6 +49,7 @@ import ml_collections  # noqa: E402
 
 from pinnflow import metrics as M  # noqa: E402
 from pinnflow.benchmarks import ghia_tables  # noqa: E402
+from pinnflow.configs import get_config  # noqa: E402
 from pinnflow.data import DATA_DIR, load_cylinder_wake, load_featflow_series  # noqa: E402
 from pinnflow.physics import velocity_gradient, vorticity_from_grad  # noqa: E402
 from pinnflow.problems import PROBLEMS, DFGCylinderPINN  # noqa: E402
@@ -55,6 +59,18 @@ from pinnflow.utils import load_params  # noqa: E402
 # registry: which run backs which scene, and the verdict from STATUS.md
 # --------------------------------------------------------------------------------------
 REGISTRY: Dict[str, Dict] = {
+    "stenosis": {
+        "run": "stenosis_mri_G",
+        "benchmark": "stenosis_mri",
+        "tab": "real",
+        "title": "Blood pressure across a stenosis, from MRI-like flow data (synthetic study)",
+        "status": "not trained",
+        "gate": "peak trans-stenotic pressure drop within 10% of the CFD truth",
+        "measured": "",
+        "summary": "A 6 mm artery narrowed by 60%, with a pulsing inflow at 73 beats per minute. The network sees only what a 4D-flow MRI scan would give (0.6 mm voxels, 24 phases per beat, scanner noise) and infers the pressure, which no scan measures.",
+        "reference": "CFD of the same vessel (pinnflow/vessel.py)",
+        "controls": {"t": [0.0, 12.0]},
+    },
     "tgv2d": {
         "run": "tgv2d_G",
         "benchmark": "tgv2d",
@@ -180,8 +196,10 @@ class Scene:
         self.id = sid
         self.spec = spec
         self.workdir = runs / spec["run"]
-        self.cfg = load_cfg(self.workdir)
         self.bench_name = spec["benchmark"]
+        has_cfg = (self.workdir / "config.json").exists()
+        self.cfg = load_cfg(self.workdir) if has_cfg else get_config(self.bench_name)
+        self.trained = has_cfg and (self.workdir / "latest.msgpack").exists()
         self.metrics = {
             "final_eval": read_json(self.workdir / "final_eval.json"),
             "eval": read_json(self.workdir / "eval.json"),
@@ -220,6 +238,20 @@ class Scene:
             self.spec["controls"]["t"] = [0.0, self.t_end]
             bch = self.problem.bench
             self.domain = [0.0, bch.length, 0.0, bch.height]
+        elif b == "stenosis_mri":
+            self.problem = PROBLEMS[b](self.cfg)
+            self.params = self._restore(self.problem, self.workdir / "latest.msgpack") if self.trained else None
+            pr = self.problem
+            self.domain = [pr.x_lo, pr.x_hi, -0.5, 0.5]
+            self.spec["controls"]["t"] = [0.0, pr.T]
+            fe = self.metrics["final_eval"]
+            if self.trained and "dp_peak_err_pct" in fe:
+                ok = fe["dp_peak_err_pct"] < 10.0
+                self.spec["status"] = "passed" if ok else "gate missed"
+                self.spec["measured"] = (f"peak pressure drop {fe['dp_peak_pinn_mmHg']:.2f} mmHg vs {fe['dp_peak_true_mmHg']:.2f} mmHg truth "
+                                         f"({fe['dp_peak_err_pct']:.1f}% off); simplified Bernoulli {fe['dp_peak_bernoulli_mmHg']:.2f} mmHg")
+            elif self.trained:
+                self.spec["status"] = "trained, not evaluated"
         else:
             self.problem = PROBLEMS[b](self.cfg)
             self.params = self._restore(self.problem, self.workdir / "latest.msgpack")
@@ -322,6 +354,9 @@ class Scene:
             fields.update(u=out[:, 0], v=out[:, 1], p=p, vort=out[:, 3], u_ref=ref[0], v_ref=ref[1], p_ref=ref[2])
             header["t_ref"] = float(self.wake["t"][self._nearest_snapshot(t)])
 
+        elif b == "stenosis_mri":
+            self._field_stenosis(t, x, y, X, Y, pts2, fields, header)
+
         elif b == "cylinder":
             idx = min(int(t // self.dt), len(self.windows) - 1)
             problem, params = self.windows[idx]
@@ -336,6 +371,58 @@ class Scene:
             header["cylinder"] = {"center": list(bch.center), "radius": bch.radius}
             header["window"] = idx
         return pack_fields(fields, header, dtype)
+
+    def _field_stenosis(self, t, x, y, X, Y, pts2, fields, header):
+        """Network (when trained), CFD truth at the nearest frame, and the scan at the nearest phase; pressures in
+        mmHg relative to the distal end of the field of view; NaN outside the lumen."""
+        from scipy.interpolate import RegularGridInterpolator
+
+        pr = self.problem
+        v, tr, mri = pr.vessel, pr.truth, pr.mri
+        k = pr.phys["mmHg_per_unit"]
+        t = float(np.mod(t, pr.T))
+        outside = ~np.asarray(v.inside(X.ravel(), Y.ravel()))
+        f = int(np.argmin(np.abs(np.mod(tr["t"] - t + pr.T / 2, pr.T) - pr.T / 2)))
+        q = np.stack([X.ravel(), Y.ravel()], -1)
+        i_d = int(np.argmin(np.abs(tr["x"] - pr.x_hi)))
+        p_ref_end = float(np.nanmean(tr["p"][f, i_d]))
+        for key in ("u", "v", "p"):
+            interp = RegularGridInterpolator((tr["x"], tr["y"]), tr[key][f], bounds_error=False, fill_value=np.nan)
+            a = interp(q)
+            if key == "p":
+                a = (a - p_ref_end) * k
+            fields[f"{key}_ref"] = a
+        m = int(np.argmin(np.abs(np.mod(mri["t"] - t + pr.T / 2, pr.T) - pr.T / 2)))
+        ivx = np.clip(((X.ravel() - (mri["x"][0] - pr.voxel / 2)) / pr.voxel).astype(int), 0, len(mri["x"]) - 1)
+        ivy = np.clip(((Y.ravel() + 0.5) / pr.voxel).astype(int), 0, len(mri["y"]) - 1)
+        fields["u_mri"] = mri["u"][m][ivx, ivy]
+        fields["v_mri"] = mri["v"][m][ivx, ivy]
+        if self.trained:
+            pts = np.concatenate([np.full((pts2.shape[0], 1), t), pts2], 1)
+            out = self._eval_pts(self._field_fn("f", pr.velocity_fn(self.params), True), pts)
+            last = np.abs(X.ravel() - x[-1]) < 1e-9
+            p = (out[:, 2] - np.mean(out[last & ~outside, 2])) * k
+            fields.update(u=out[:, 0], v=out[:, 1], p=p, vort=out[:, 3])
+        for name in list(fields):
+            fields[name] = np.asarray(fields[name], np.float64)
+            fields[name][outside] = np.nan
+        header.update(t=t, t_ref=float(tr["t"][f]), t_mri=float(mri["t"][m]), trained=self.trained,
+                      units={"p": "mmHg", "velocity_ms": pr.phys["U_ms"]}, voxel=pr.voxel, ranges=self._stenosis_ranges())
+
+    def _stenosis_ranges(self) -> Dict:
+        """Colour ranges fixed over the whole heartbeat, measured on the CFD truth in the field of view."""
+        if "ranges" in self._cache:
+            return self._cache["ranges"]
+        pr = self.problem
+        tr = pr.truth
+        sel = (tr["x"] > pr.x_lo) & (tr["x"] < pr.x_hi)
+        i_d = int(np.argmin(np.abs(tr["x"] - pr.x_hi)))
+        p = (tr["p"][:, sel] - np.nanmean(tr["p"][:, i_d], axis=1)[:, None, None]) * pr.phys["mmHg_per_unit"]
+        speed = np.hypot(tr["u"][:, sel], tr["v"][:, sel])
+        m = float(np.nanpercentile(np.abs(p), 99.5))
+        smax = float(np.nanpercentile(speed, 99.5))
+        self._cache["ranges"] = {"pressure": [-m, m], "speed": [0.0, smax], "mri": [0.0, smax]}
+        return self._cache["ranges"]
 
     def _field_tgv3d(self, t: float, n: int, dtype: str = "float32") -> bytes:
         n = int(n)
@@ -396,7 +483,27 @@ class Scene:
             return self._curve_tgv2d()
         if b == "cylinder_inverse":
             return self._curve_inverse()
+        if b == "stenosis_mri":
+            return self._curve_stenosis()
         return {}
+
+    def _curve_stenosis(self) -> Dict:
+        if "curve" in self._cache:
+            return self._cache["curve"]
+        pr = self.problem
+        k = pr.phys["mmHg_per_unit"]
+        out = {
+            "t": pr.truth["t"].tolist(), "dp_true": (pr.dp_true_frames * k).tolist(),
+            "t_phase": pr.mri["t"].tolist(), "dp_bernoulli": np.asarray(pr.dp_bernoulli).tolist(),
+            "period": pr.T, "period_s": pr.phys["period_s"], "gate_pct": 10.0, "trained": self.trained,
+            "metrics": self.metrics["final_eval"],
+        }
+        if self.trained:
+            tq = np.linspace(0.0, pr.T, 49)[:-1]
+            out["t_pinn"] = tq.tolist()
+            out["dp_pinn"] = (pr.pressure_drop(self.params, tq) * k).tolist()
+        self._cache["curve"] = out
+        return out
 
     def _curve_tgv3d(self) -> Dict:
         if "curve" in self._cache:
@@ -534,6 +641,8 @@ class Scene:
         are traced arguments, so moving the time or Reynolds number never recompiles either.
         """
         b = self.bench_name
+        if not self.trained:
+            raise PermissionError("this scene's network is not trained yet")
         n, d = pts.shape
         cap = max(256, 1 << int(np.ceil(np.log2(max(n, 1)))))
         padded = np.zeros((cap, d), np.float32)
@@ -571,7 +680,16 @@ class Scene:
     # ---- metadata -----------------------------------------------------------------------
     def describe(self) -> Dict:
         d = {k: v for k, v in self.spec.items()}
-        d.update(id=self.id, domain=self.domain, metrics=self.metrics, dims=3 if self.bench_name == "tgv3d" else 2)
+        d.update(id=self.id, domain=self.domain, metrics=self.metrics, dims=3 if self.bench_name == "tgv3d" else 2, trained=self.trained)
+        if self.bench_name == "stenosis_mri":  # retrained in place: clients key their curve caches on the checkpoint
+            ck = self.workdir / "latest.msgpack"
+            d["run_stamp"] = f"{int(ck.stat().st_mtime)}" if self.trained and ck.exists() else "data"
+        d.setdefault("tab", "bench")
+        if self.bench_name == "stenosis_mri":
+            v = self.problem.vessel
+            xs = np.linspace(self.domain[0], self.domain[1], 181)
+            d["walls"] = {"x": xs.tolist(), "h": np.asarray(v.half_width(xs)).tolist()}
+            d["physical"] = self.problem.phys
         if self.bench_name == "cavity":
             d["controls"] = {"Re": sorted(self.params)}
         return d
@@ -609,6 +727,8 @@ def build_bundle(runs: Path, out: Path) -> Path:
                 best[Re] = (N, f)
         for _, f in sorted(best.values()):
             tar.add(f, arcname=f"data/cavity_fd/{f.name}")
+        for f in sorted((DATA_DIR / "stenosis").glob("*")):
+            tar.add(f, arcname=f"data/stenosis/{f.name}")
     tmp.replace(out)
     return out
 
@@ -631,7 +751,8 @@ def build_app(runs: Path, only: Optional[List[str]] = None, warm: bool = True):
         if only and sid not in only:
             continue
         wd = runs / spec["run"]
-        if not (wd / "config.json").exists():
+        data_only = spec["benchmark"] == "stenosis_mri" and (DATA_DIR / "stenosis" / "mri.npz").exists()
+        if not (wd / "config.json").exists() and not data_only:
             print(f"[serve] skip {sid}: {wd} not found")
             continue
         t0 = time.time()
@@ -680,6 +801,8 @@ def build_app(runs: Path, only: Optional[List[str]] = None, warm: bool = True):
         t0 = time.time()
         from starlette.concurrency import run_in_threadpool
 
+        if not getattr(s, "trained", True):
+            raise HTTPException(409, f"{sid}: the network is not trained yet")
         vel = await run_in_threadpool(s.velocity, pts, t, Re)  # GPU work off the event loop: one scene compiling never blocks another
         return Response(content=vel.astype("<f4").tobytes(), media_type="application/octet-stream", headers={"X-Compute-Seconds": f"{time.time() - t0:.4f}"})
 

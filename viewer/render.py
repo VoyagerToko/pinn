@@ -13,6 +13,9 @@ STONE = theme.hex_rgb(theme.STONE).astype(np.uint8)
 def scalar(fields: Dict[str, np.ndarray], view: str, ref: bool = False) -> Optional[np.ndarray]:
     """The quantity a view shows, from the prediction or (ref=True) the reference. None when not served."""
     sfx = "_ref" if ref else ""
+    if view == "mri":  # the scan's voxel velocities; its reference is the CFD speed it averages
+        u, v = (fields.get("u_ref"), fields.get("v_ref")) if ref else (fields.get("u_mri"), fields.get("v_mri"))
+        return None if u is None or v is None else np.hypot(u, v)
     if view in ("pigment", "speed", "sensors"):
         if "speed" in fields and not ref:
             return fields["speed"]
@@ -72,7 +75,7 @@ def qimage(rgb: np.ndarray):
 
 
 def rel_l2(fields: Dict[str, np.ndarray]) -> Optional[float]:
-    if "u_ref" not in fields:
+    if "u_ref" not in fields or "u" not in fields:
         return None
     pu, pv, ru, rv = (fields[k] for k in ("u", "v", "u_ref", "v_ref"))
     m = np.isfinite(pu) & np.isfinite(ru)

@@ -129,6 +129,10 @@ class ParticleEngine(QThread):
     def set_scene(self, spec: S.SceneSpec, domain: List[float], t: float, Re: float, trange: Optional[List[float]] = None):
         self.cmds.put(("scene", spec, domain, t, Re, trange))
 
+    def set_idle(self):
+        """Stop advecting: the current scene has no trained network."""
+        self.cmds.put(("idle",))
+
     def set_time(self, t: float):
         self.cmds.put(("time", t))
 
@@ -178,6 +182,8 @@ class ParticleEngine(QThread):
                         colors = scene_colors(spec)
                         ring = 0
                         playing = False
+                    elif k == "idle":
+                        spec = None
                     elif k == "time":
                         t = float(c[1])
                     elif k == "Re":
@@ -391,7 +397,7 @@ class Warmer(QThread):
     def __init__(self, base: str, models: Dict[str, Dict], first: str):
         super().__init__()
         self.base, self.models, self.first = base, models, first
-        self.runs = {sid: m.get("run", "run") for sid, m in models.items()}
+        self.runs = {sid: (f"{m.get('run', 'run')}-{m['run_stamp']}" if m.get("run_stamp") else m.get("run", "run")) for sid, m in models.items()}
 
     def run(self):
         client = Client(self.base)
@@ -406,6 +412,9 @@ class Warmer(QThread):
             self.progress.emit(sid, "warming")
             try:
                 client.field(sid, t, Re, spec.field_n)
+                if not self.models[sid].get("trained", True):
+                    self.progress.emit(sid, "ready")
+                    continue
                 client.velocity(sid, np.zeros((S.CAPACITY, spec.dims), np.float32) + 0.5, t, Re)
                 if spec.chart in ("centreline", "centreline_live"):
                     client.velocity(sid, np.full((402, 2), 0.5, np.float32), 0.0, Re)

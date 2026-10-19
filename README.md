@@ -216,6 +216,44 @@ and a 13 px text floor.
 | `viewer/materials.py` | Procedural paper, shadows and ink. |
 | `viewer/theme.py` | Palette, OKLab maps and fonts. |
 
+## 6c. Real-world use case: blood pressure across a stenosis from MRI-like flow data
+
+A synthetic, controlled study, not a clinical tool. It is the inverse problem of the wake benchmark, applied to a
+clinical question: can the pressure drop across a narrowed artery be inferred from the velocities a 4D-flow MRI scan
+measures? Today that drop is measured with a catheter, or estimated from Doppler ultrasound with the simplified
+Bernoulli rule, dp [mmHg] = 4 v_peak^2.
+
+```bash
+python scripts/make_stenosis_data.py                 # CFD truth + simulated scan -> data/stenosis/  (~10 min, CPU)
+python scripts/train.py --benchmark stenosis_mri     # the inverse network -> runs/stenosis_mri_G/
+# or, on this laptop's WSL GPU, in the background, restarting the live server when it is done:
+wsl -d Ubuntu -- bash /mnt/c/.../pinn/scripts/train_local_wsl.sh stenosis_mri
+pytest tests/test_vessel.py                          # Poiseuille check of the solver, scan statistics, smoke train
+```
+
+- **The vessel (`pinnflow/vessel.py`).** A 2D artery, D = 6 mm, with a smooth 60% narrowing. The inflow is
+  heartbeat-shaped, 73 beats per minute, at Re = 150 on the mean flow (0.087 m/s for blood).
+- **The truth.** A staggered-grid projection solver with 50 cells per diameter. It runs three cycles from rest
+  and keeps the last; the last two cycles agree to float32. Its pressure gradient matches Poiseuille flow to 0.6%.
+- **The simulated scan.** Velocity averaged over 0.6 mm voxels and 24 cardiac phases, in lumen voxels only, with
+  scanner phase noise at SNR 20 (sigma = 1.2 cm/s, VENC 0.51 m/s). That is 20,160 samples.
+- **The network (`pinnflow/problems/stenosis_inverse.py`).**
+  - It outputs a stream function and pressure, so continuity holds exactly, and it is exactly periodic in time
+    with the heartbeat.
+  - It is fitted to each voxel through the average of the network over that voxel and phase window.
+  - Momentum residuals apply at the known viscosity, the wall is no-slip, and one point pins the pressure gauge.
+  - Pressure is never given to it.
+- **The score (`final_eval.json`).** The velocity and pressure error against the CFD truth, and the peak and
+  cycle RMS error of the pressure drop from 2 diameters upstream to the throat. The gate is the peak within 10%.
+  The same file reports the simplified Bernoulli estimate from the same scan, for comparison.
+  - The truth peaks at **0.59 mmHg**. The Bernoulli estimate is 0.78 mmHg, 32% too high, because it ignores the
+    viscous losses and the inflow kinetic energy.
+  - The gradient is mild because Re is kept modest; `--Re` and `--severity` change it.
+- **Viewer and server.** The scene lives in the viewer's "Real-world use case" tab.
+  - Before training, the server already serves the scan and the CFD truth, labelled as untrained.
+  - After training, restart the server: `runs/stenosis_mri_G/latest.msgpack` and `final_eval.json` plug in as they
+    are, and the pigment is carried by the network's flow.
+
 ## 7. Deviations from the handbook and things to know
 
 See also `CLAUDE.md` (project brief for assistants and contributors), `STATUS.md` (benchmark results and open

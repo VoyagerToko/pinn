@@ -20,7 +20,8 @@
       "ochre": { "role": "primary", "displayName": "Ochre (wake from data)", "canonical": "#a97b22" },
       "madder": { "role": "primary", "displayName": "Madder (cylinder, forward)", "canonical": "#9e2b3a" },
       "cobalt-violet": { "role": "primary", "displayName": "Cobalt Violet (Taylor-Green 3D)", "canonical": "#5e3f73" },
-      "verdigris": { "role": "primary", "displayName": "Verdigris (cavity, any lid)", "canonical": "#2f7d74" }
+      "verdigris": { "role": "primary", "displayName": "Verdigris (cavity, any lid)", "canonical": "#2f7d74" },
+      "vermilion": { "role": "primary", "displayName": "Vermilion (real-world use case: stenosis from MRI)", "canonical": "#b4462c" }
     },
     "typographyMeta": {
       "display": { "displayName": "Scene title", "purpose": "The scene's name on the tray's lip, one line." },

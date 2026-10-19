@@ -19,6 +19,7 @@ colors:
   madder: "#9e2b3a"
   cobalt-violet: "#5e3f73"
   verdigris: "#2f7d74"
+  vermilion: "#b4462c"
 typography:
   display:
     fontFamily: "Bodoni Moda, Georgia, serif"
@@ -112,7 +113,7 @@ Density is low and the image leads. One tray dominates every screen, and its lip
 A muted daylight bath with saturated, historic pigments used sparingly.
 
 ### Primary
-- **The seven pigments** (indigo, malachite, umber, ochre, madder, cobalt violet, verdigris): one per scene, in benchmark order. A pigment marks its scene: the rail drop, the strike under it, the playhead, the network's curve and the dye in the bath. A pigment is not a text colour. Ochre in particular is only for rules and markers, at 2.3:1 on the ground.
+- **The seven pigments** (indigo, malachite, umber, ochre, madder, cobalt violet, verdigris): one per benchmark scene, in benchmark order. **Vermilion** is the eighth, for the real-world use case (the stenosis), the only scene on its tab. A pigment marks its scene: the rail drop, the strike under it, the playhead, the network's curve and the dye in the bath. A pigment is not a text colour. Ochre in particular is only for rules and markers, at 2.3:1 on the ground.
 
 ### Neutral
 - **Size** (ground): the window ground, the bath's resting water.
@@ -188,10 +189,13 @@ Procedural paper with a deckled alpha edge, faint fibre grain at 2.8% and its ow
 ### Call-out
 A measured value pinned to a place in the flow. It has a 9 px ink ring with a pale halo, an elbow leader into the water, and a paper slip with ink text at 13 px tabular. It is used on both cavities' corners in the divergence view, and both lids get one so the comparison is fair.
 
+### Tab strip
+Two tabs over the rail: "The seven benchmarks" and "Real-world use case". The text is Franklin at 15 px; the active tab is ink at weight 650, with a 2 px ink underline that slides between tabs over 200 ms. T toggles the tab. The rail keeps one cell width (a seventh of the window) on every tab, so a drop never moves. The real-world tab's single drop is followed by a 14 px note saying it is a synthetic study, not a clinical tool.
+
 ### Rail, chips and bars
 - **Rail:** seven drops with short names and verdict words. The active drop grows, gains an ink outline and is underlined by a strike in its pigment. The strike slides between cells over 200 ms with an exponential ease-out. An unfilled drop means that scene is still compiling on the GPU.
 - **View chips:** text at a fixed active-weight width, so nothing shifts. A pigment underline slides to the chosen chip. A madder dot marks the view that holds a failure's evidence.
-- **Time bar:** the whole range is on screen, with a pigment fill and a blot playhead. The Reynolds bar is either discrete marks or a log scale with the held-out band hatched.
+- **Time bar:** the whole range is on screen, with a pigment fill and a blot playhead. It can show another unit: the heartbeat in seconds. The Reynolds bar is either discrete marks or a log scale with the held-out band hatched.
 - **Easing:** playheads ease only on real jumps, over 4% of the range, never during playback.
 - **Focus:** every control takes Tab focus and arrow keys. The focus ring is a 1.5 px ink rule shown only after keyboard focus.
 

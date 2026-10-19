@@ -19,6 +19,7 @@ kept under their own names; nothing is deleted.
 | D Taylor-Green 3D (SPINN) | dissipation peak within 5% of the reference (0.01282 at t=9.0, digitised) | tgv3d_H (80k steps, reduced) | peak of -dE/dt 0.0292 at t=0 (127%); 2 nu zeta max 4.9e-4 (96%); no transition | **failed** (D7) |
 | inverse wake | lambda_1, lambda_2 recovered; hidden pressure | cylinder_inverse (25k + 1k, reduced) | lambda_1 = 0.99997 (0.004%), lambda_2 = 0.010006 (0.065%); hidden pressure 2.44%; u 0.54%, v 2.69% (20 snapshots) | **passed** |
 | PI-DeepONet cavity | zero-shot error < 10% at Re=400 (Re in [300, 530] never sampled in training) | deeponet_cavity_curr2 + 4 continuations (660k Adam steps in total, lr 3e-4 with clipping, last 60k with a 4x larger batch; planned 200k + 20k) | velocity vs FD at Re=400: **9.65%** (14.0% after the curriculum, then 11.1%, 10.27%, 10.11%, 9.65%); Re=100 2.1%, Re=1000 30.0% | **passed** (D8, D10-D12) |
+| real-world use case: stenosis from MRI (synthetic) | peak trans-stenotic pressure drop within 10% of the CFD truth (0.59 mmHg); simplified Bernoulli on the same scan gives 0.78 mmHg (+31%) | stenosis_mri_G, laptop budget (6 x 128, 40k + 2k L-BFGS), started 2026-10-20 01:5x on the RTX 3060 | pending | **training** |
 
 ## Run log
 
@@ -249,6 +250,24 @@ is not meaningful then (the JAX peak is).
 - Benchmark B rows C/F: 0.024-0.026 s per Adam step, 0.17 s per L-BFGS iteration (full batch, line search),
   2.3 h per run including 20k L-BFGS iterations; 1.6 GB JAX peak; inference 1.1e7 points/s.
 - Row A-C configs (VP, second order) are ~3x cheaper per step than rows D-G (stream function, third order).
+
+## Real-world use case: blood pressure from MRI-like flow data (2026-10-20)
+
+- **Dataset** (`scripts/make_stenosis_data.py`, 596 s on the laptop CPU).
+  - The vessel: a 6 mm artery with a 60% narrowing, Re 150, 73 bpm.
+  - The truth: the MAC projection solver at 50 cells per diameter, three cycles. The last two cycles agree to
+    float32; max |div u| is 1e-13.
+  - The scan: 0.6 mm voxels, 24 phases, SNR 20, giving 840 lumen voxels x 24 phases = 20,160 samples
+    (VENC 0.51 m/s, sigma 1.2 cm/s).
+  - The solver reproduces Poiseuille's pressure gradient to 0.6% (tests/test_vessel.py).
+- **Cost on the RTX 3060 Laptop (6 GB, shared with the live server).**
+  - Compiling the training step: 6.3 min.
+  - At the default size (6 x 192, 4096 collocation points): 820 ms per step. 80k steps would take about 18 h,
+    so that size is for the desktop.
+  - The overnight laptop run uses 6 x 128 with 2048 points.
+  - Evaluation: 50 s the first time (compile), then 0.3 s.
+- **Viewer.** The "Real-world use case" tab shows the scan and the CFD truth before training. The trained network
+  plugs in on the next server restart (`scripts/train_local_wsl.sh` restarts it when training ends).
 
 ## Open issues
 

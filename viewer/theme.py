@@ -36,6 +36,7 @@ PIGMENTS: Dict[str, str] = {
     "madder": "#9e2b3a",
     "cobalt violet": "#5e3f73",
     "verdigris": "#2f7d74",
+    "vermilion": "#b4462c",
 }
 SCENE_PIGMENT = {
     "tgv2d": "indigo",
@@ -45,6 +46,7 @@ SCENE_PIGMENT = {
     "cylinder_fwd": "madder",
     "tgv3d": "cobalt violet",
     "deeponet": "verdigris",
+    "stenosis": "vermilion",
 }
 # the order drops cycle through when the presenter adds pigment
 DROP_ORDER = ["madder", "indigo", "ochre", "malachite", "cobalt violet", "umber", "verdigris"]
@@ -108,6 +110,7 @@ VIEWS = {
     "divergence": {"label": "divergence", "map": "diverging", "signed": True},
     "error": {"label": "error", "map": "error", "signed": False},
     "sensors": {"label": "sensors", "map": "sheen", "signed": False},
+    "mri": {"label": "MRI scan", "map": "sequential", "signed": False},
 }
 
 

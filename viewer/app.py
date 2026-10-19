@@ -15,7 +15,7 @@ from viewer import render, theme
 from viewer import scenes as S
 from viewer.bath import Bath2D
 from viewer.client import Client, find_server, start_wsl_server, wsl_path, ROOT
-from viewer.controls import PlayButton, ReBar, SceneRail, TimeBar, VerdictStamp, ViewChips
+from viewer.controls import PlayButton, ReBar, SceneRail, TabStrip, TimeBar, VerdictStamp, ViewChips
 from viewer.panel import BathPanel, Body
 from viewer.rack import Rack
 from viewer.workers import AuxWorker, FieldWorker, ParticleEngine, Warmer
@@ -28,6 +28,13 @@ CAPTIONS = {
     "cylinder_fwd": "Every bar should reach the line: the mass that enters must leave. At the reduced training budget a quarter of it is lost downstream, and the wake never sheds.",
     "tgv3d": "The reference peaks near t = 9, where the flow turns turbulent. The network's dissipation is largest at the start and never peaks: it keeps the flow smooth.",
     "deeponet": "Drag the lid speed. Every position is one forward pass of one network. The hatched band was never sampled in training; Re 400 sits inside it.",
+    "stenosis": "No scan measures pressure. The network infers it from the voxel velocities and the equations of motion. The dashed line is the simplified Bernoulli rule used in clinics today, applied to the same scan.",
+}
+CAPTION_UNTRAINED = {
+    "stenosis": "The network is not trained yet. The bath shows the scan it will learn from; the sheet shows the CFD truth it will be scored against. Train it with: python scripts/train.py --benchmark stenosis_mri, then restart the server.",
+}
+TAB_NOTE = {
+    "real": "A synthetic study, not a clinical tool: a simulated artery, a simulated scan of it, and a network that infers the blood pressure the scan cannot measure.",
 }
 SHEET = {
     "tgv2d": ("Reference: exact solution", "same instant, same colour scale"),
@@ -37,6 +44,7 @@ SHEET = {
     "cylinder_fwd": ("Reference", ""),
     "tgv3d": ("Reference", ""),
     "deeponet": ("Reference: finite differences", ""),
+    "stenosis": ("Reference: CFD of the same vessel", "same instant, same colour scale"),
 }
 EMPTY = {
     "cylinder_fwd": "FEATFLOW publishes drag, lift and pressure-probe series for this benchmark, not a field. The chart below carries the evidence.",
@@ -81,8 +89,11 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(28, 14, 28, 14)
         outer.setSpacing(12)
 
+        self.tabs = TabStrip()
+        outer.addWidget(self.tabs)
         self.rail = SceneRail()
         outer.addWidget(self.rail)
+        self.tab = "bench"
 
         self.stamp = VerdictStamp()
         self.stage = QStackedWidget()
@@ -144,6 +155,8 @@ class MainWindow(QMainWindow):
         self._retry = 0
 
         self.rail.chosen.connect(self.select_scene)
+        self.tabs.chosen.connect(self.set_tab)
+        self.tabs.set_active("bench", animate=False)
         self.chips.chosen.connect(self.set_view)
         self.play.toggled.connect(self.set_playing)
         self.timebar.scrubbed.connect(self.scrub)
@@ -151,10 +164,10 @@ class MainWindow(QMainWindow):
         self.bath.dropped.connect(self.on_drop)
         # Left and Right are not window shortcuts: a focused rail, chip row or bar uses them first (keyPressEvent below)
         for key, fn in (("Space", self.toggle_play), ("R", self.reset_dye), ("V", self.next_view), ("F", self.toggle_full), ("Escape", self.leave_full),
-                        ("S", self.start_server), ("D", self.drop_random)):
+                        ("S", self.start_server), ("D", self.drop_random), ("T", self.toggle_tab)):
             QShortcut(QKeySequence(key), self, activated=fn)
-        for i, s in enumerate(S.SCENES):
-            QShortcut(QKeySequence(str(i + 1)), self, activated=lambda sid=s.sid: self.select_scene(sid))
+        for i in range(7):  # 1 to 7 pick a scene within the current tab
+            QShortcut(QKeySequence(str(i + 1)), self, activated=lambda i=i: self.select_index(i))
 
         self.bath.state = "connecting"
         self.bath.state_text = "Looking for the network server"
@@ -192,6 +205,8 @@ class MainWindow(QMainWindow):
         self.device = info["health"].get("device", "")
         self.models = {m["id"]: m for m in info["models"]}
         self.rail.available = set(self.models)
+        for sid, m in self.models.items():
+            _apply_server_verdict(S.BY_ID.get(sid), m)
         self.engine = ParticleEngine(url)
         self.engine.stepped.connect(self.on_step)
         self.engine.status.connect(self.on_status)
@@ -203,12 +218,12 @@ class MainWindow(QMainWindow):
         self.fieldw.ready.connect(self.on_field)
         self.fieldw.status.connect(self.on_status)
         self.fieldw.start()
-        self.aux = AuxWorker(url, {sid: m["run"] for sid, m in self.models.items()})
+        self.aux = AuxWorker(url, {sid: _cache_key(m) for sid, m in self.models.items()})
         self.aux.curve.connect(self.on_curve)
         self.aux.points.connect(self.on_points)
         self.aux.centreline.connect(self.on_line)
         self.aux.start()
-        first = self.args.scene if self.args.scene in self.models else next(s.sid for s in S.SCENES if s.sid in self.models)
+        first = self.args.scene if self.args.scene in self.models else next(s.sid for s in S.SCENES if s.sid in self.models and s.tab == "bench")
         self.warmer = Warmer(url, self.models, first)
         self.warmer.progress.connect(self.on_warm)
         self.warmer.start()
@@ -228,22 +243,30 @@ class MainWindow(QMainWindow):
             return
         spec = S.BY_ID[sid]
         m = self.models[sid]
+        if spec.tab != self.tab:
+            self.set_tab(spec.tab, select=False)
         self.spec = spec
         ctl = m.get("controls", {})
         domain = [float(v) for v in m["domain"]]
         self.rail.set_active(sid)
         self.title.setText(spec.name)
         self.summary.setText(m.get("summary", ""))
-        self.stamp.set(spec.verdict, spec.headline, spec.headline_label, spec.pigment)
+        source = "measured, STATUS.md" if spec.tab == "bench" else ("measured, final_eval.json" if spec.trained else "awaiting training")
+        self.stamp.set(spec.verdict, spec.headline, spec.headline_label, spec.pigment, source)
         self.panel.set_live("")
-        self.view = "pigment"
-        self.chips.configure(spec.views, self.view, spec.pigment, spec.evidence)
+        views = spec.views if spec.trained else ["mri"]
+        self.view = views[0]
+        self.chips.configure(views, self.view, spec.pigment, spec.evidence if spec.trained else None)
         self.set_playing(False)
-        self.play.setVisible(spec.play_rate > 0)
+        self.play.setVisible(spec.play_rate > 0 and spec.trained)
         if "t" in ctl:
             t0, t1 = ctl["t"]
             self.t = float(t1) if spec.start_at_end else float(t0)
-            self.timebar.set_range(t0, t1, "s" if sid == "cylinder_fwd" else "", spec.pigment)
+            phys = m.get("physical") or {}
+            if "period_s" in phys:  # one heartbeat, shown in seconds
+                self.timebar.set_range(t0, t1, "s", spec.pigment, scale=phys["period_s"] / (t1 - t0))
+            else:
+                self.timebar.set_range(t0, t1, "s" if sid == "cylinder_fwd" else "", spec.pigment)
             self.timebar.set_t(self.t)
             self.controls.setCurrentWidget(self.timebar)
         else:
@@ -278,13 +301,22 @@ class MainWindow(QMainWindow):
             self.bath.cylinder = None
             self.bath.sensors = None
             self.bath.legend = None
+            walls = m.get("walls")
+            self.bath.walls = (np.asarray(walls["x"]), np.asarray(walls["h"])) if walls else None
             ready = self.rail.ready.get(sid) == "ready"
-            self.bath.state = "live" if ready else "compiling"
-            self.bath.state_text = "" if ready else "Compiling this scene's network on the GPU\n(first time only, about 25 s; the pigment moves when it is ready)"
+            if not spec.trained:
+                self.bath.state = "untrained"
+                self.bath.state_text = ""
+            else:
+                self.bath.state = "live" if ready else "compiling"
+                self.bath.state_text = "" if ready else "Compiling this scene's network on the GPU\n(first time only, about 25 s; the pigment moves when it is ready)"
             r = self.bath.domain_rect()
             self.engine.set_raster_size(max(8, int(r.width() * self.devicePixelRatioF() / 2)), max(8, int(r.height() * self.devicePixelRatioF() / 2)))
             self.bath.update()
-        self.engine.set_scene(spec, domain, self.t, self.Re, ctl.get("t"))
+        if spec.trained:
+            self.engine.set_scene(spec, domain, self.t, self.Re, ctl.get("t"))
+        else:
+            self.engine.set_idle()  # no network to carry the pigment yet
         self.request_field()
         title, note = SHEET[sid]
         self.rack.sheet.title, self.rack.sheet.note = title, note
@@ -294,7 +326,7 @@ class MainWindow(QMainWindow):
         self.rack.sheet.empty = EMPTY.get(sid, "Waiting for the first frame")
         self.rack.set_compact(sid in EMPTY)  # no reference field: a short note, the chart takes the room
         self.rack.sheet.update()
-        self.rack.caption.setText(CAPTIONS.get(sid, ""))
+        self.rack.caption.setText(CAPTIONS.get(sid, "") if spec.trained else CAPTION_UNTRAINED.get(sid, ""))
         self.rack.chart.clear("Loading the evidence for this scene")
         self.rack.show_coefficients(False)
         if spec.chart in ("centreline_live",):
@@ -306,6 +338,25 @@ class MainWindow(QMainWindow):
             self.aux.want_points(sid)
         self.update_mode_line()
 
+    def set_tab(self, tab: str, select: bool = True):
+        self.tab = tab
+        self.tabs.set_active(tab)
+        self.rail.set_scenes(S.scenes_in(tab), TAB_NOTE.get(tab, ""))
+        if self.spec is not None:
+            self.rail.set_active(self.spec.sid, animate=False)
+        if select:
+            first = next((s.sid for s in S.scenes_in(tab) if s.sid in self.models), None)
+            if first:
+                self.select_scene(first)
+
+    def toggle_tab(self):
+        self.set_tab("real" if self.tab == "bench" else "bench")
+
+    def select_index(self, i: int):
+        scenes = S.scenes_in(self.tab)
+        if i < len(scenes):
+            self.select_scene(scenes[i].sid)
+
     def request_field(self):
         if self.spec and self.fieldw:
             self.fieldw.request(self.spec.sid, self.t, self.Re, self.spec.field_n)
@@ -314,30 +365,38 @@ class MainWindow(QMainWindow):
         s = self.spec
         if s is None:
             return
-        if s.play_rate == 0:
+        k, unit = self.timebar.scale, (" " + self.timebar.unit) if self.timebar.unit else ""
+        tt = f"{self.t * k:.2f}{unit}"
+        if not s.trained:
+            txt = f"The scan at t = {tt}. Drag the time bar to step through its phases of the heartbeat."
+        elif s.play_rate == 0:
             txt = f"Steady flow, Re {self.Re:.0f}: each update asks the network for every particle's velocity."
         elif s.coupled:
             txt = ("Playing: flow time and pigment advance together; the trails are pathlines." if self.playing
-                   else f"Paused at t = {self.t:.2f}; the pigment follows this instant. Space runs time.")
+                   else f"Paused at t = {tt}; the pigment follows this instant. Space runs time.")
         else:
-            txt = f"Pigment follows the flow at t = {self.t:.2f}; play or drag the time bar."
+            txt = f"Pigment follows the flow at t = {tt}; play or drag the time bar."
         self.mode_line.setText(txt)
 
     # ------------------------------------------------------------------ controls
+    def _views(self):
+        """The views this scene can show now: an untrained scene has only its scan."""
+        return self.spec.views if self.spec.trained else ["mri"]
+
     def set_view(self, view: str):
-        if self.spec is None or view not in self.spec.views:
+        if self.spec is None or view not in self._views():
             return
         self.view = view
-        self.chips.configure(self.spec.views, view, self.spec.pigment, self.spec.evidence)
+        self.chips.configure(self._views(), view, self.spec.pigment, self.spec.evidence if self.spec.trained else None)
         self.render_field()
 
     def next_view(self):
         if self.spec:
-            v = self.spec.views
-            self.set_view(v[(v.index(self.view) + 1) % len(v)])
+            v = self._views()
+            self.set_view(v[(v.index(self.view) + 1) % len(v)] if self.view in v else v[0])
 
     def set_playing(self, on: bool):
-        if self.spec is None or self.spec.play_rate == 0:
+        if self.spec is None or self.spec.play_rate == 0 or not self.spec.trained:
             on = False
         self.playing = on
         self.play.set_playing(on)
@@ -469,7 +528,10 @@ class MainWindow(QMainWindow):
         ref = render.scalar(f, base_view, ref=True)
         if a is None:
             return
-        if base_view == "error":
+        rng = hdr.get("ranges") or {}
+        if base_view in rng:  # fixed over the whole heartbeat (the server measures it on the CFD truth)
+            lo, hi = rng[base_view]
+        elif base_view == "error":
             lo, hi = render.scale_for([a], "error")
         else:
             key = (sid, base_view, res["Re"] if self.spec.re_mode else None)
@@ -482,7 +544,8 @@ class MainWindow(QMainWindow):
         self.bath.pigment_opacity = 1.0 if view in ("pigment", "sensors") else 0.2
         self.bath.callouts = _corner_callouts(a) if (view == "divergence" and sid in ("cavity_ok", "cavity_hard")) else []
         self.bath.cylinder = hdr.get("cylinder")
-        self.bath.legend = None if view in ("pigment", "sensors") else (render.colour_map(base_view), lo, hi, _legend_label(base_view, sid))
+        k = (hdr.get("units") or {}).get("velocity_ms", 1.0) if base_view in ("speed", "mri", "error") and hdr.get("units") else 1.0
+        self.bath.legend = None if view in ("pigment", "sensors") else (render.colour_map(base_view), lo * k, hi * k, _legend_label(base_view, sid))
         if view == "sensors":
             self.update_sensors()
         else:
@@ -553,6 +616,8 @@ class MainWindow(QMainWindow):
             if line is None or data is None:
                 return
             self.rack.chart.draw("centreline", data, s.pigment, Re=line[0], line=line[1])
+        elif data is not None and s.chart == "pressure_drop":
+            self.rack.chart.draw("pressure_drop", data, s.pigment, t=self.t)
         elif data is not None and s.chart == "lambdas":
             self.rack.coeffs.set(data)
             self.rack.show_coefficients(True)
@@ -599,7 +664,34 @@ class MainWindow(QMainWindow):
         super().closeEvent(e)
 
 
+def _cache_key(m) -> str:
+    """Run name plus the checkpoint's timestamp: curves cached for an older (or untrained) network are never reused."""
+    stamp = m.get("run_stamp")
+    return f"{m['run']}-{stamp}" if stamp else m["run"]
+
+
+def _apply_server_verdict(spec, m) -> None:
+    """The real-world scene's verdict comes from its evaluation (final_eval.json), read by the server."""
+    if spec is None or spec.tab != "real":
+        return
+    spec.trained = bool(m.get("trained", True))
+    fe = (m.get("metrics") or {}).get("final_eval") or {}
+    if spec.trained and "dp_peak_err_pct" in fe:
+        spec.verdict = "passed" if fe["dp_peak_err_pct"] < 10.0 else "gate missed"
+        spec.headline = f"{fe['dp_peak_err_pct']:.1f} %"
+        spec.headline_label = (f"peak pressure-drop error: {fe['dp_peak_pinn_mmHg']:.2f} vs {fe['dp_peak_true_mmHg']:.2f} mmHg; "
+                               f"gate below 10 %")
+    elif spec.trained:
+        spec.verdict, spec.headline, spec.headline_label = "trained", "-", "not evaluated yet: final_eval.json is missing"
+    else:
+        spec.verdict, spec.headline = "not trained", "-"
+        spec.headline_label = "train it: python scripts/train.py --benchmark stenosis_mri"
+
+
 def _legend_label(view: str, sid: str) -> str:
+    if sid == "stenosis":
+        return {"speed": "speed [m/s]", "mri": "scan speed [m/s], voxel and phase averages with noise", "error": "|network - CFD| [m/s], this frame",
+                "pressure": "pressure [mmHg], relative to the distal end", "vorticity": "vorticity"}.get(view, view)
     if view == "error":
         return "|network - reference|, this frame"
     unit = " [m/s]" if sid == "cylinder_fwd" and view == "speed" else ""

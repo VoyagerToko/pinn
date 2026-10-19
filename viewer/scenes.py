@@ -36,6 +36,8 @@ class SceneSpec:
     evidence: Optional[str] = None  # the view that shows why a failure failed
     dims: int = 2
     start_at_end: bool = False  # open at the end of the time window (flows that start from rest)
+    tab: str = "bench"          # bench: the seven benchmarks | real: the real-world use case
+    trained: bool = True        # False until the scene's network exists (the server says so)
 
     @property
     def pigment(self) -> str:
@@ -59,7 +61,17 @@ SCENES: List[SceneSpec] = [
               ["pigment", "speed"], 48, dye_rate=1.0, play_rate=1.0, coupled=True, layout="slabs", periodic=True, chart="dissipation", evidence="dissipation", dims=3),
     SceneSpec("deeponet", "Cavity, any lid speed", "Cavity, any lid", "passed", "9.65 %", "error at Re 400, a lid speed it never saw; gate below 10 %",
               ["pigment", "speed", "vorticity", "error"], 128, dye_rate=0.35, layout="hbands", re_mode="continuous", chart="centreline_live"),
+    # the real-world use case: verdict and number are filled in from the server once the network is trained
+    SceneSpec("stenosis", "Blood pressure from an MRI scan", "Stenosis, from MRI", "not trained", "-",
+              "peak pressure-drop error against the CFD truth; gate below 10 %",
+              ["pigment", "mri", "speed", "pressure", "error"], 360, dye_rate=1.0, play_rate=1.5, coupled=True,
+              emitter={"x": 0.55, "rows": 24, "per_step": 24}, chart="pressure_drop", evidence="pressure", tab="real"),
 ]
+TABS = [("bench", "The seven benchmarks"), ("real", "Real-world use case")]
+
+
+def scenes_in(tab: str) -> List[SceneSpec]:
+    return [s for s in SCENES if s.tab == tab]
 BY_ID = {s.sid: s for s in SCENES}
 
 
