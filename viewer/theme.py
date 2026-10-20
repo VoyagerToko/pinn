@@ -47,6 +47,7 @@ SCENE_PIGMENT = {
     "tgv3d": "cobalt violet",
     "deeponet": "verdigris",
     "stenosis": "vermilion",
+    "stenosis_fast": "vermilion",
 }
 # the order drops cycle through when the presenter adds pigment
 DROP_ORDER = ["madder", "indigo", "ochre", "malachite", "cobalt violet", "umber", "verdigris"]

@@ -30,6 +30,7 @@ CAPTIONS = {
     "deeponet": "Drag the lid speed. Every position is one forward pass of one network. The hatched band was never sampled in training; Re 400 sits inside it.",
     "stenosis": "No scan measures pressure. The network infers it from the voxel velocities and the equations of motion. The dashed line is the simplified Bernoulli rule used in clinics today, applied to the same scan.",
 }
+CAPTIONS["stenosis_fast"] = CAPTIONS["stenosis"]
 CAPTION_UNTRAINED = {
     "stenosis": "The network is not trained yet. The bath shows the scan it will learn from; the sheet shows the CFD truth it will be scored against. Train it with: python scripts/train.py --benchmark stenosis_mri, then restart the server.",
 }
@@ -45,6 +46,7 @@ SHEET = {
     "tgv3d": ("Reference", ""),
     "deeponet": ("Reference: finite differences", ""),
     "stenosis": ("Reference: CFD of the same vessel", "same instant, same colour scale"),
+    "stenosis_fast": ("Reference: CFD of the same vessel", "same instant, same colour scale"),
 }
 EMPTY = {
     "cylinder_fwd": "FEATFLOW publishes drag, lift and pressure-probe series for this benchmark, not a field. The chart below carries the evidence.",
@@ -689,7 +691,7 @@ def _apply_server_verdict(spec, m) -> None:
 
 
 def _legend_label(view: str, sid: str) -> str:
-    if sid == "stenosis":
+    if sid in ("stenosis", "stenosis_fast"):
         return {"speed": "speed [m/s]", "mri": "scan speed [m/s], voxel and phase averages with noise", "error": "|network - CFD| [m/s], this frame",
                 "pressure": "pressure [mmHg], relative to the distal end", "vorticity": "vorticity"}.get(view, view)
     if view == "error":

@@ -4,6 +4,8 @@
     python scripts/make_stenosis_data.py                    # defaults: 60% stenosis, Re 150, 0.6 mm voxels, SNR 20
     python scripts/make_stenosis_data.py --snr 10 --out data/stenosis_snr10
     python scripts/make_stenosis_data.py --voxel 0.2        # 1.2 mm voxels (must be a multiple of 1/N)
+    python scripts/make_stenosis_data.py --Re 300 --severity 0.7 --bpm 73 --N 60 --length 18 --fov 0.5 11.5 --out data/stenosis_fast
+                                                            # the Doppler regime: a ~1.6 m/s jet, ~10 mmHg
 
 About 8 minutes on a laptop CPU at the default grid (N = 50 cells per diameter, three cardiac cycles; the last is
 kept). The training problem reads the directory given by problem.data_dir (default data/stenosis).
@@ -30,7 +32,10 @@ def main():
     ap.add_argument("--out", default=str(ROOT / "data" / "stenosis"))
     ap.add_argument("--severity", type=float, default=0.6, help="diameter reduction at the throat")
     ap.add_argument("--Re", type=float, default=150.0)
-    ap.add_argument("--N", type=int, default=50, help="CFD cells per diameter")
+    ap.add_argument("--N", type=int, default=50, help="CFD cells per diameter (the voxel must be a multiple of 1/N)")
+    ap.add_argument("--bpm", type=float, default=None, help="heart rate; sets the non-dimensional period from the physical scale (default: period 12)")
+    ap.add_argument("--length", type=float, default=14.0, help="vessel length in diameters (outlet far downstream of the field of view)")
+    ap.add_argument("--fov", type=float, nargs=2, default=(0.5, 9.5), help="scanned field of view along the vessel, in diameters")
     ap.add_argument("--periods", type=int, default=3, help="cardiac cycles from rest; the last one is kept")
     ap.add_argument("--voxel", type=float, default=0.1, help="MRI voxel size in diameters (0.1 = 0.6 mm)")
     ap.add_argument("--phases", type=int, default=24, help="MRI cardiac phases per beat")
@@ -38,7 +43,10 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
-    v = StenosisVessel(severity=args.severity, Re=args.Re)
+    v = StenosisVessel(severity=args.severity, Re=args.Re, length=args.length, fov=tuple(args.fov))
+    if args.bpm:  # the same heart rate at any Re: period = (60 / bpm) * U / D
+        U = v.Re * v.nu_m2s / v.D_m
+        v = StenosisVessel(severity=args.severity, Re=args.Re, length=args.length, fov=tuple(args.fov), period=60.0 / args.bpm * U / v.D_m)
     phys = v.physical()
     print(f"[stenosis] vessel D = {phys['D_mm']:.1f} mm, mean inflow {phys['U_ms']:.3f} m/s, Re {v.Re:g}, "
           f"beat {phys['period_s']:.2f} s ({phys['heart_rate_bpm']:.0f} bpm), {100 * v.severity:.0f}% stenosis")

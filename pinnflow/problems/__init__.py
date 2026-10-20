@@ -8,6 +8,7 @@ from .cylinder import DFGCylinderPINN
 from .cylinder_inverse import CylinderWakeInversePINN
 from .deeponet import ParametricCavityDeepONet
 from .stenosis_inverse import StenosisMRIInversePINN
+from .coa_inverse import CoarctationMRIInversePINN
 from .tgv2d import TaylorGreen2DPINN
 from .tgv3d import TaylorGreen3DSPINN
 
@@ -19,6 +20,7 @@ PROBLEMS = {
     "cylinder_inverse": CylinderWakeInversePINN,
     "deeponet_cavity": ParametricCavityDeepONet,
     "stenosis_mri": StenosisMRIInversePINN,
+    "coa_mri": CoarctationMRIInversePINN,
 }
 
 __all__ = ["Problem", "PROBLEMS", *[c.__name__ for c in PROBLEMS.values()]]

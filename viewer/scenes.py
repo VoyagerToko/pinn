@@ -66,6 +66,10 @@ SCENES: List[SceneSpec] = [
               "peak pressure-drop error against the CFD truth; gate below 10 %",
               ["pigment", "mri", "speed", "pressure", "error"], 360, dye_rate=1.0, play_rate=1.5, coupled=True,
               emitter={"x": 0.55, "rows": 24, "per_step": 24}, chart="pressure_drop", evidence="pressure", tab="real"),
+    SceneSpec("stenosis_fast", "Blood pressure, a fast jet", "Fast jet, from MRI", "not trained", "-",
+              "peak pressure-drop error against the CFD truth; gate below 10 %",
+              ["pigment", "mri", "speed", "pressure", "error"], 360, dye_rate=1.0, play_rate=3.0, coupled=True,
+              emitter={"x": 0.55, "rows": 24, "per_step": 24}, chart="pressure_drop", evidence="pressure", tab="real"),
 ]
 TABS = [("bench", "The seven benchmarks"), ("real", "Real-world use case")]
 

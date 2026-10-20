@@ -59,6 +59,19 @@ from pinnflow.utils import load_params  # noqa: E402
 # registry: which run backs which scene, and the verdict from STATUS.md
 # --------------------------------------------------------------------------------------
 REGISTRY: Dict[str, Dict] = {
+    "stenosis_fast": {
+        "run": "stenosis_mri_fast",
+        "benchmark": "stenosis_mri",
+        "data_dir": "data/stenosis_fast",
+        "tab": "real",
+        "title": "Blood pressure across a tighter stenosis with a fast jet, from MRI-like data (synthetic study)",
+        "status": "not trained",
+        "gate": "peak trans-stenotic pressure drop within 10% of the CFD truth",
+        "measured": "",
+        "summary": "The same 6 mm artery narrowed by 70%, at twice the flow: a jet of about 1.6 m/s and a pressure drop near 10 mmHg, the regime the clinical Doppler rule was built for. The network sees only the simulated scan.",
+        "reference": "CFD of the same vessel (pinnflow/vessel.py)",
+        "controls": {"t": [0.0, 24.0]},
+    },
     "stenosis": {
         "run": "stenosis_mri_G",
         "benchmark": "stenosis_mri",
@@ -199,6 +212,9 @@ class Scene:
         self.bench_name = spec["benchmark"]
         has_cfg = (self.workdir / "config.json").exists()
         self.cfg = load_cfg(self.workdir) if has_cfg else get_config(self.bench_name)
+        if "data_dir" in spec:  # the dataset this scene is served from, relative to the repository root
+            with self.cfg.unlocked():
+                self.cfg.problem.data_dir = str(ROOT / spec["data_dir"])
         self.trained = has_cfg and (self.workdir / "latest.msgpack").exists()
         self.metrics = {
             "final_eval": read_json(self.workdir / "final_eval.json"),
@@ -751,7 +767,7 @@ def build_app(runs: Path, only: Optional[List[str]] = None, warm: bool = True):
         if only and sid not in only:
             continue
         wd = runs / spec["run"]
-        data_only = spec["benchmark"] == "stenosis_mri" and (DATA_DIR / "stenosis" / "mri.npz").exists()
+        data_only = spec["benchmark"] == "stenosis_mri" and (ROOT / spec.get("data_dir", "data/stenosis") / "mri.npz").exists()
         if not (wd / "config.json").exists() and not data_only:
             print(f"[serve] skip {sid}: {wd} not found")
             continue

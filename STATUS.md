@@ -279,6 +279,38 @@ is not meaningful then (the JAX peak is).
 - **Viewer.** The "Real-world use case" tab shows the scan and the CFD truth before training. The trained network
   plugs in on the next server restart (`scripts/train_local_wsl.sh` restarts it when training ends).
 
+## Real data: coarctation phantom, 4D flow MRI vs catheter (2026-10-20, in progress)
+
+- **Data.** The public 4D-FlowP aortic coarctation phantom (Nair et al., Stanford Digital Repository,
+  doi:10.25740/ms528wr9373, CC BY-NC 4.0).
+  - 8 cases: 2 patient geometries x baseline/severe x 2 flow rates.
+  - Siemens 4D flow at 1.8 mm, 13-17 frames; catheter AAo and DAo pressure at 1 kHz.
+  - Fluid: glycerol-water 40/60, 1.1 g/cm^3, 4.2 mPa s.
+  - Fetched selectively (`scripts/remote_zip.py`, 1.4 GB of the 18 GB archive); read by `pinnflow/coa_phantom.py`.
+- **Catheter peak drops (location 3, beat-averaged):**
+
+  | case | baseline | severe | baseline, low flow | severe, low flow |
+  |---|---|---|---|---|
+  | P1 | 16.2 | 24.7 | 9.0 | 13.4 |
+  | P2 | 13.1 | 20.8 | 7.2 | 12.0 |
+
+  - P2 changes by under 1.4 mmHg across the 5 downstream catheter positions.
+  - P1 spans 11.7-23.2 (baseline) and 24.3-32.0 (severe), so P2 is the cleaner test.
+- **The scan agrees with the phantom's flow meter.**
+  - Ascending aorta: 248 mL/s peak against 245 mL/s, 67 mL/s mean against 67.7 mL/s.
+  - Near the arch the measured flux falls to 60%, from signal loss in complex flow. The upstream pressure plane then
+    moves down the ascending aorta to where the flux agrees (P2 baseline: 25 mm, 62 against 67.7 mL/s).
+- **Conventional pressure Poisson estimate on the same scan, P2 baseline: 0.7 mmHg against 13.1 mmHg (provisional).**
+  - The solver is exact on known gradients.
+  - The convective term integrates to almost nothing between the planes: laminar physics recovers the jet's 9 mmHg
+    downstream, while the catheter measures turbulent loss below the voxel scale.
+  - The source publication reports conventional 4D flow at slope 0.63 against the catheter. The gap to this number is
+    not yet explained.
+  - Simplified Bernoulli on the scan: 9.9 mmHg.
+- **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
+  viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`docs/DESKTOP_TRAINING.md`); results go to
+  `runs/coa_report/report.md`.
+
 ## Open issues
 
 - Cavity: D1 above (rows C, D and the soft-lid F rerun are queued in this order).

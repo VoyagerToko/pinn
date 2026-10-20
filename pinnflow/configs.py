@@ -190,6 +190,26 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         t.res_batch_size = 4096
         t.bc_batch_size = 1024
         w.init_weights = ml_collections.ConfigDict({"u_data": 1.0, "v_data": 1.0, "r_u": 1.0, "r_v": 1.0, "u_wall": 1.0, "v_wall": 1.0, "p_anchor": 1.0})
+    elif benchmark == "coa_mri":
+        # real data: aortic coarctation phantom, 4D flow MRI + catheter (pinnflow/coa_phantom.py)
+        p.case = "P2_baseline"
+        p.data_file = None  # default data/stanford_coa/prepared/<case>.npz (scripts/prepare_coa.py)
+        p.sub_samples = 4
+        p.p_scale = 3.0  # pressure in rho (1 m/s)^2 = 8.25 mmHg; the catheter drops are 7-25 mmHg
+        p.eddy_viscosity = False  # True: learn nu_t(t, x) (5th output) for unresolved turbulent mixing in the jet
+        p.nu_t_scale = 0.01
+        c.arch.out_dim = 4
+        c.arch.num_layers = 6
+        c.arch.hidden_dim = 256
+        c.arch.fourier_emb = ml_collections.ConfigDict({"embed_scale": 8.0, "embed_dim": 256})
+        t.max_steps = 60000
+        t.lbfgs_steps = 0
+        t.data_batch_size = 2048
+        t.res_batch_size = 4096
+        t.bc_batch_size = 2048
+        t.res_chunk = 1024
+        w.init_weights = ml_collections.ConfigDict({"u_data": 1.0, "v_data": 1.0, "w_data": 1.0, "r_u": 1.0, "r_v": 1.0, "r_w": 1.0, "r_c": 1.0, "wall": 1.0, "p_anchor": 1.0})
+        w.fixed_terms = ("p_anchor", "gauge", "nu_t_reg")
     elif benchmark == "deeponet_cavity":
         p.Re_min = 100.0
         p.Re_max = 1000.0
@@ -276,7 +296,7 @@ def get_config(benchmark: str, ablation: str = "G", overrides=None) -> ml_collec
         row = "G"  # the SPINN row only exists for the 3D case
     if benchmark == "tgv3d":
         row = "H"  # Benchmark D is only run with the full 3D configuration
-    if benchmark not in ("cylinder_inverse", "deeponet_cavity", "stenosis_mri"):
+    if benchmark not in ("cylinder_inverse", "deeponet_cavity", "stenosis_mri", "coa_mri"):
         _apply_ablation(c, benchmark, row)
     c.name = f"{benchmark}_{row}"
     if overrides:
