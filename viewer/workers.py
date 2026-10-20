@@ -22,6 +22,7 @@ from viewer import theme
 from viewer.client import ROOT, Client
 
 CACHE = ROOT / "runs" / "_viewer_cache"
+NO_CURVE_CACHE = {"coa"}  # its comparison table grows as each phantom case arrives from the training machine
 
 
 def scene_colors(spec: S.SceneSpec) -> np.ndarray:
@@ -400,7 +401,9 @@ class AuxWorker(QThread):
                 if job[0] == "curve":
                     sid = job[1]
                     path = CACHE / f"{sid}__{self.runs.get(sid, 'run')}__curve.json"
-                    if path.exists():
+                    if sid in NO_CURVE_CACHE:
+                        data = client.curve(sid)
+                    elif path.exists():
                         data = json.loads(path.read_text())
                     else:
                         data = client.curve(sid)
@@ -454,7 +457,7 @@ class Warmer(QThread):
         # then the rack's curves, the slowest first-time work (the forward cylinder takes ~2 min), into the disk cache
         for sid in order:
             spec = S.BY_ID.get(sid)
-            if sid not in self.models or spec is None or spec.chart in ("none", "centreline_live"):
+            if sid not in self.models or spec is None or spec.chart in ("none", "centreline_live") or sid in NO_CURVE_CACHE:
                 continue
             path = CACHE / f"{sid}__{self.runs.get(sid, 'run')}__curve.json"
             if path.exists():
