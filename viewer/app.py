@@ -623,9 +623,9 @@ class MainWindow(QMainWindow):
         lo, hi = self.scales[("coa", view)]
         lut = theme.MAPS["diverging" if view == "pressure" else "sequential"]
         self.tank.update_cloud(vals, lut, lo, hi, alpha=0.55 if view != "mri" else 0.8)
-        label = {"mri": "scan speed", "speed": "network speed", "pressure": "network pressure, relative to the downstream plane"}[view]
-        unit = "mmHg" if view == "pressure" else "m/s"
-        self.panel.set_live(f"colour: {label}, {lo:.2f} to {hi:.2f} {unit}")
+        label = {"mri": "scan speed", "speed": "network speed", "pressure": "network pressure"}[view]
+        rng = f"+-{hi:.0f} mmHg" if view == "pressure" else f"0 to {hi:.1f} m/s"
+        self.panel.set_live(f"colour: {label}, {rng}")
 
     def update_sensors(self):
         pts = self.points.get("inverse")

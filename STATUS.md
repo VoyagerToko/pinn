@@ -300,13 +300,31 @@ is not meaningful then (the JAX peak is).
   - Ascending aorta: 248 mL/s peak against 245 mL/s, 67 mL/s mean against 67.7 mL/s.
   - Near the arch the measured flux falls to 60%, from signal loss in complex flow. The upstream pressure plane then
     moves down the ascending aorta to where the flux agrees (P2 baseline: 25 mm, 62 against 67.7 mL/s).
-- **Conventional pressure Poisson estimate on the same scan, P2 baseline: 0.7 mmHg against 13.1 mmHg (provisional).**
-  - The solver is exact on known gradients.
-  - The convective term integrates to almost nothing between the planes: laminar physics recovers the jet's 9 mmHg
-    downstream, while the catheter measures turbulent loss below the voxel scale.
-  - The source publication reports conventional 4D flow at slope 0.63 against the catheter. The gap to this number is
-    not yet explained.
-  - Simplified Bernoulli on the scan: 9.9 mmHg.
+- **Background phase correction (prep v3).** Eddy currents put a 1-2 cm/s offset on the static gel. P2_severe's
+  first segmentation found the gel instead of the aorta (plane flux 2% of the meter). Subtracting a 2nd-order
+  polynomial fitted to static tissue fixes it.
+  - All 8 cases segment to 108-198 mL.
+  - Every upstream plane carries 92-109% of the meter's flow.
+- **Scan-based baselines on all 8 cases** (`scripts/coa_report.py`, peak drop in mmHg):
+
+  | case | catheter | pressure Poisson | Bernoulli 4 v^2 |
+  |---|---|---|---|
+  | P1 baseline | 16.2 | 3.4 | 10.3 |
+  | P1 severe | 24.7 | 1.4 | 22.0 |
+  | P2 baseline | 13.1 | 0.9 | 8.0 |
+  | P2 severe | 20.8 | 0.3 | 16.7 |
+  | P1 baseline, low flow | 8.9 | 1.5 | 5.1 |
+  | P1 severe, low flow | 13.4 | 1.3 | 12.0 |
+  | P2 baseline, low flow | 7.2 | 0.6 | 3.9 |
+  | P2 severe, low flow | 12.0 | 1.0 | 7.4 |
+
+  - **Bernoulli:** slope 0.80, R^2 0.9, mean error 30%, always low. The 1.8 mm voxels blur the jet's core; the
+    peak is taken through a 3x3x3 median at the 99.5th percentile, because a single noisy or aliased voxel had read
+    4.0 m/s at a 2.75 m/s VENC.
+  - **Pressure Poisson:** slope 0.1 (provisional). Laminar momentum at the voxel scale recovers the jet's pressure
+    downstream; the catheter measures turbulent loss. The solver is exact on known gradients. The source publication
+    reports conventional 4D flow at slope 0.63; the gap is not explained yet.
+  - **The bar for the networks:** beat Bernoulli's 30%.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`docs/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
