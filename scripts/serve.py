@@ -59,6 +59,20 @@ from pinnflow.utils import load_params  # noqa: E402
 # registry: which run backs which scene, and the verdict from STATUS.md
 # --------------------------------------------------------------------------------------
 REGISTRY: Dict[str, Dict] = {
+    "coa": {
+        "run": "coa_P2_severe_eddy",
+        "runs": ["coa_P2_severe_eddy", "coa_P2_severe"],  # the first that exists is served
+        "benchmark": "coa_mri",
+        "case": "P2_severe",
+        "tab": "real",
+        "title": "Pressure across an aortic coarctation, from real 4D flow MRI, against catheter pressure",
+        "status": "not trained",
+        "gate": "peak trans-coarctation pressure drop within 20% of the catheter",
+        "measured": "",
+        "summary": "A 3D-printed copy of a patient's aorta with a coarctation, in a pulsing flow loop, scanned by a real MRI (Stanford 4D-FlowP phantom, CC BY-NC 4.0). The catheter measured the pressure drop; the network sees only the scan.",
+        "reference": "catheter pressure, upstream and downstream of the coarctation, averaged over 30+ beats",
+        "controls": {"t": [0.0, 107.0]},
+    },
     "stenosis_fast": {
         "run": "stenosis_mri_fast",
         "benchmark": "stenosis_mri",
@@ -212,6 +226,9 @@ class Scene:
         self.bench_name = spec["benchmark"]
         has_cfg = (self.workdir / "config.json").exists()
         self.cfg = load_cfg(self.workdir) if has_cfg else get_config(self.bench_name)
+        if "case" in spec and not has_cfg:
+            with self.cfg.unlocked():
+                self.cfg.problem.case = spec["case"]
         if "data_dir" in spec:  # the dataset this scene is served from, relative to the repository root
             with self.cfg.unlocked():
                 self.cfg.problem.data_dir = str(ROOT / spec["data_dir"])
@@ -254,6 +271,19 @@ class Scene:
             self.spec["controls"]["t"] = [0.0, self.t_end]
             bch = self.problem.bench
             self.domain = [0.0, bch.length, 0.0, bch.height]
+        elif b == "coa_mri":
+            self.problem = PROBLEMS[b](self.cfg)
+            self.params = self._restore(self.problem, self.workdir / "latest.msgpack") if self.trained else None
+            pr = self.problem
+            lo, hi = np.asarray(pr.lumen).min(0), np.asarray(pr.lumen).max(0)
+            self.domain = [float(lo[0]), float(hi[0]), float(lo[1]), float(hi[1]), float(lo[2]), float(hi[2])]
+            self.spec["controls"]["t"] = [0.0, pr.T]
+            fe = self.metrics["final_eval"]
+            if self.trained and "dp_peak_err_pct" in fe:
+                self.spec["status"] = "passed" if fe["dp_peak_err_pct"] < 20.0 else "gate missed"
+                self.spec["measured"] = f"peak drop {fe['dp_peak_pinn_mmHg']:.1f} mmHg vs catheter {fe['dp_peak_cath_mmHg']:.1f} mmHg ({fe['dp_peak_err_pct']:.0f}% off)"
+            elif self.trained:
+                self.spec["status"] = "trained, not evaluated"
         elif b == "stenosis_mri":
             self.problem = PROBLEMS[b](self.cfg)
             self.params = self._restore(self.problem, self.workdir / "latest.msgpack") if self.trained else None
@@ -307,6 +337,8 @@ class Scene:
         b = self.bench_name
         if b == "tgv3d":
             return self._field_tgv3d(t, n, dtype)
+        if b == "coa_mri":
+            return self._field_coa(t, dtype)
         ext = self.domain
         aspect = (ext[3] - ext[2]) / (ext[1] - ext[0])
         nx = int(n)
@@ -440,6 +472,25 @@ class Scene:
         self._cache["ranges"] = {"pressure": [-m, m], "speed": [0.0, smax], "mri": [0.0, smax]}
         return self._cache["ranges"]
 
+    def _field_coa(self, t: float, dtype: str = "float32") -> bytes:
+        """Values on the lumen voxels (the order of /points): the scan's speed at its nearest frame (m/s), and, when
+        trained, the network's speed (m/s) and pressure (mmHg, relative to the downstream plane's mean) at t."""
+        pr = self.problem
+        d = pr.d
+        t = float(np.mod(t, pr.T))
+        ts = np.asarray(d["t_s"]) / 0.01
+        f = int(np.argmin(np.abs(np.mod(ts - t + pr.T / 2, pr.T) - pr.T / 2)))
+        fields = {"speed_mri": np.linalg.norm(np.asarray(d["vel"])[f], axis=-1)}
+        if self.trained:
+            pos = np.asarray(pr.lumen)
+            out = pr.predict(self.params, np.concatenate([np.full((len(pos), 1), t, np.float32), pos], 1))
+            dao = pr.predict(self.params, np.concatenate([np.full((len(pr.dao), 1), t, np.float32), pr.dao], 1))[:, 3].mean()
+            fields["speed_net"] = np.linalg.norm(out[:, :3], axis=-1)
+            fields["p_net"] = (out[:, 3] - dao) * pr.mmHg_per_unit
+        header = {"model": self.id, "shape": [int(len(pr.lumen))], "t": t, "frame": f, "t_frame": float(ts[f]),
+                  "trained": self.trained, "units": {"speed": "m/s", "p": "mmHg"}}
+        return pack_fields(fields, header, dtype)
+
     def _field_tgv3d(self, t: float, n: int, dtype: str = "float32") -> bytes:
         n = int(n)
         f = self.problem.grid_fields(self.params, float(t), n)
@@ -501,7 +552,33 @@ class Scene:
             return self._curve_inverse()
         if b == "stenosis_mri":
             return self._curve_stenosis()
+        if b == "coa_mri":
+            return self._curve_coa()
         return {}
+
+    def _curve_coa(self) -> Dict:
+        """The case's catheter waveform and the network's pressure drop over the beat, and every case's comparison."""
+        if "curve" in self._cache:
+            return self._cache["curve"]
+        pr = self.problem
+        out = {"case": pr.case, "period_s": float(pr.d["period_s"]), "cath_phase_s": pr.cath_phase.tolist(), "cath_dp_mmHg": pr.cath_dp.tolist(),
+               "trained": self.trained, "metrics": self.metrics["final_eval"], "rows": []}
+        if self.trained:
+            tq = np.linspace(0.0, pr.T, 64, endpoint=False)
+            out["t_s"] = (tq * 0.01).tolist()
+            out["dp_pinn_mmHg"] = pr.pressure_drop(self.params, tq).tolist()
+        base = read_json(ROOT / "runs" / "coa_report" / "baselines.json")
+        report = read_json(ROOT / "runs" / "coa_report" / "report.json")
+        rows = {r["case"]: r for r in report.get("rows", [])}
+        for case, b in base.items():
+            r = dict(rows.get(case, {}), case=case, **b)
+            for tag, run in (("pinn_laminar", f"coa_{case}"), ("pinn_eddy", f"coa_{case}_eddy")):
+                fe = read_json(ROOT / "runs" / run / "final_eval.json")
+                if "dp_peak_pinn_mmHg" in fe:
+                    r[f"{tag}_peak_mmHg"] = fe["dp_peak_pinn_mmHg"]
+            out["rows"].append(r)
+        self._cache["curve"] = out
+        return out
 
     def _curve_stenosis(self) -> Dict:
         if "curve" in self._cache:
@@ -643,6 +720,12 @@ class Scene:
 
     # ---- points -------------------------------------------------------------------------
     def points(self) -> Dict:
+        if self.bench_name == "coa_mri":  # the lumen geometry, once per client
+            pr = self.problem
+            pos = np.asarray(pr.lumen)
+            ijk = np.round((pos - pos.min(0)) / pr.voxel).astype(int)
+            return {"pos": pos.tolist(), "ijk": ijk.tolist(), "origin": pos.min(0).tolist(), "voxel": pr.voxel.tolist(),
+                    "seeds": pr.aao.tolist(), "dao": pr.dao.tolist(), "n": int(len(pos))}
         if self.bench_name != "cylinder_inverse":
             return {}
         pts = np.asarray(self.problem.train_pts)
@@ -688,7 +771,7 @@ class Scene:
             key = ("vel",)
             if key not in self._jit:
                 vf = self.problem.velocity_fn(self.params)
-                k = 3 if b == "tgv3d" else 2
+                k = 3 if b in ("tgv3d", "coa_mri") else 2
                 self._jit[key] = jax.jit(jax.vmap(lambda p, t, Re: vf(jnp.concatenate([jnp.reshape(t, (1,)), p]))[:k], in_axes=(0, None, None)))
         out = self._jit[key](jnp.asarray(padded), jnp.asarray(t, jnp.float32), jnp.asarray(Re, jnp.float32))
         return np.asarray(out, dtype=np.float32)[:n]
@@ -696,7 +779,11 @@ class Scene:
     # ---- metadata -----------------------------------------------------------------------
     def describe(self) -> Dict:
         d = {k: v for k, v in self.spec.items()}
-        d.update(id=self.id, domain=self.domain, metrics=self.metrics, dims=3 if self.bench_name == "tgv3d" else 2, trained=self.trained)
+        d.update(id=self.id, domain=self.domain, metrics=self.metrics, dims=3 if self.bench_name in ("tgv3d", "coa_mri") else 2, trained=self.trained)
+        if self.bench_name == "coa_mri":
+            d["physical"] = {"period_s": float(self.problem.d["period_s"])}
+            ck = self.workdir / "latest.msgpack"
+            d["run_stamp"] = f"{int(ck.stat().st_mtime)}" if self.trained and ck.exists() else "data"
         if self.bench_name == "stenosis_mri":  # retrained in place: clients key their curve caches on the checkpoint
             ck = self.workdir / "latest.msgpack"
             d["run_stamp"] = f"{int(ck.stat().st_mtime)}" if self.trained and ck.exists() else "data"
@@ -766,8 +853,11 @@ def build_app(runs: Path, only: Optional[List[str]] = None, warm: bool = True):
     for sid, spec in REGISTRY.items():
         if only and sid not in only:
             continue
+        if "runs" in spec:  # serve the first of the listed runs that exists
+            spec = dict(spec, run=next((r for r in spec["runs"] if (runs / r / "config.json").exists()), spec["runs"][0]))
         wd = runs / spec["run"]
-        data_only = spec["benchmark"] == "stenosis_mri" and (ROOT / spec.get("data_dir", "data/stenosis") / "mri.npz").exists()
+        data_only = (spec["benchmark"] == "stenosis_mri" and (ROOT / spec.get("data_dir", "data/stenosis") / "mri.npz").exists()) or \
+                    (spec["benchmark"] == "coa_mri" and (DATA_DIR / "stanford_coa" / "prepared" / f"{spec.get('case', '')}.npz").exists())
         if not (wd / "config.json").exists() and not data_only:
             print(f"[serve] skip {sid}: {wd} not found")
             continue

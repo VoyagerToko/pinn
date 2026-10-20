@@ -240,6 +240,29 @@ class EvidenceChart(QWidget):
                 ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=3, fontsize=9.5, labelcolor=soft,
                           handlelength=1.8, columnspacing=1.4, borderaxespad=0.2)
                 self.cursor = self._cursor(ax, (t or 0.0) * ks)
+            elif kind == "coa_compare":
+                ax = self._ax("Peak pressure drop across the coarctation, every phantom case", pad=30)
+                rows = sorted(data.get("rows", []), key=lambda r: r["case"])
+                methods = [("catheter_peak_mmHg", "catheter", ink, 1.0), ("ppe_peak_mmHg", "conventional 4D flow", theme.STONE, 1.0),
+                           ("bernoulli_peak_mmHg", "Bernoulli 4 v^2", theme.HAIR, 0.55), ("pinn_laminar_peak_mmHg", "network, laminar", pigment, 0.45),
+                           ("pinn_eddy_peak_mmHg", "network, eddy viscosity", pigment, 1.0)]
+                y = np.arange(len(rows))
+                h = 0.16
+                for k, (key, label, col, alpha) in enumerate(methods):
+                    vals = [r.get(key) for r in rows]
+                    if all(v is None for v in vals):
+                        continue
+                    ax.barh(y + (k - 2) * h, [np.nan if v is None else v for v in vals], height=h, color=col, alpha=alpha, label=label)
+                ax.set_yticks(y)
+                ax.set_yticklabels([r["case"].replace("_", " ") for r in rows])
+                for lab in ax.get_yticklabels():
+                    if lab.get_text().replace(" ", "_") == data.get("case"):
+                        lab.set_fontweight("semibold")
+                        lab.set_color(ink)
+                ax.invert_yaxis()
+                ax.set_xlabel("mmHg")
+                ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=3, fontsize=9.0, labelcolor=soft, handlelength=1.2, columnspacing=1.0, borderaxespad=0.2)
+                self.cursor = None
             elif kind == "dissipation":
                 ax = self._ax("Kinetic-energy dissipation", pad=30)
                 ax.plot(data["ref"]["t"], data["ref"]["dissipation_dns"], color=ink, lw=1.6, label="DNS reference", zorder=3)

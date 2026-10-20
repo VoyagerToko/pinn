@@ -168,6 +168,7 @@ class ParticleEngine(QThread):
         compiled = set()
         ema_hz, ema_ms = 0.0, 0.0
         colors = None
+        seeds = lumen = None
         while not self._stop:
             try:
                 while True:
@@ -175,6 +176,15 @@ class ParticleEngine(QThread):
                     k = c[0]
                     if k == "scene":
                         spec, domain, t, Re, trange = c[1], list(c[2]), float(c[3]), float(c[4]), c[5]
+                        seeds, lumen = None, None
+                        if spec.emitter is not None and spec.emitter.get("seeds"):
+                            # release points and the lumen grid (a particle outside the scanned vessel retires)
+                            g = client.points(spec.sid)
+                            seeds = np.asarray(g["seeds"], np.float32)
+                            ijk = np.asarray(g["ijk"], int)
+                            lumen = {"origin": np.asarray(g["origin"], np.float32), "voxel": np.asarray(g["voxel"], np.float32),
+                                     "grid": np.zeros(ijk.max(0) + 1, bool)}
+                            lumen["grid"][tuple(ijk.T)] = True
                         pos, pig, active = S.initial_dye(spec, domain, self.rng)
                         self.raster.reset()
                         K = PigmentRaster.K if spec.dims == 2 else 6
@@ -252,13 +262,29 @@ class ParticleEngine(QThread):
                 new = lo + np.mod(new - lo, hi - lo)
             elif spec.emitter is not None:
                 out = ((new < lo) | (new > hi)).any(-1)
+                if lumen is not None:
+                    g = lumen["grid"]
+                    q = np.round((new - lumen["origin"]) / lumen["voxel"]).astype(int)
+                    ok = (q >= 0).all(-1) & (q < np.array(g.shape)).all(-1)
+                    inside = np.zeros(len(q), bool)
+                    inside[ok] = g[tuple(q[ok].T)]
+                    out |= ~inside
                 active &= ~out
             else:
                 new = np.clip(new, lo + 1e-4, hi - 1e-4)
             pos = new.astype(np.float32)
             hist = np.roll(hist, 1, axis=0)
             hist[0] = pos
-            if spec.emitter is not None:
+            if spec.emitter is not None and seeds is not None:
+                m_ = int(spec.emitter.get("per_step", 32))
+                pick = self.rng.integers(0, len(seeds), m_)
+                ep = (seeds[pick] + (self.rng.random((m_, 3)) - 0.5).astype(np.float32) * lumen["voxel"]).astype(np.float32)
+                eg = (np.arange(m_) % 2).astype(np.int16)
+                idx = (ring + np.arange(m_)) % S.CAPACITY
+                ring = int((ring + m_) % S.CAPACITY)
+                pos[idx], pig[idx], active[idx] = ep, eg, True
+                hist[:, idx] = ep[None]
+            elif spec.emitter is not None:
                 ep, eg = S.rake(spec, domain, 0, self.rng)
                 m = len(ep)
                 idx = (ring + np.arange(m)) % S.CAPACITY

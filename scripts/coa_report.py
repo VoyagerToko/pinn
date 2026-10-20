@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 
 import numpy as np  # noqa: E402
 
-from pinnflow.coa_phantom import CASES, COA_DIR, PREP_VERSION, bernoulli_peak, ppe_pressure_drop  # noqa: E402
+from pinnflow.coa_phantom import BERNOULLI_VERSION, CASES, COA_DIR, PREP_VERSION, bernoulli_peak, ppe_pressure_drop  # noqa: E402
 
 OUT = ROOT / "runs" / "coa_report"
 
@@ -29,14 +29,17 @@ def baselines(force=False):
     cache = json.loads(f.read_text()) if f.exists() and not force else {}
     for case in CASES:
         npz = COA_DIR / "prepared" / f"{case}.npz"
-        if not npz.exists() or (case in cache and cache[case].get("prep_version", 0) >= PREP_VERSION):
+        if not npz.exists():
+            continue
+        c0 = cache.get(case, {})
+        if c0.get("prep_version", 0) >= PREP_VERSION and c0.get("bernoulli_version", 0) >= BERNOULLI_VERSION:
             continue
         prep = np.load(npz)
         ppe = ppe_pressure_drop(case)
         ber = bernoulli_peak(case)
         cache[case] = {"catheter_peak_mmHg": float(prep["cath_dp_peak_mmHg"]), "ppe_peak_mmHg": ppe["dp_peak_mmHg"],
                        "bernoulli_peak_mmHg": ber["dp_peak_mmHg"], "v_peak_ms": ber["v_peak_ms"],
-                       "aao_shift_mm": float(prep["aao_shift_mm"]) if "aao_shift_mm" in prep else 0.0, "prep_version": PREP_VERSION}
+                       "aao_shift_mm": float(prep["aao_shift_mm"]) if "aao_shift_mm" in prep else 0.0, "prep_version": PREP_VERSION, "bernoulli_version": BERNOULLI_VERSION}
         f.write_text(json.dumps(cache, indent=2))
         print(case, {k: round(v, 2) for k, v in cache[case].items()}, flush=True)
     return cache

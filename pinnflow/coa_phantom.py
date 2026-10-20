@@ -478,11 +478,17 @@ def poisson_plane_drop(mask: np.ndarray, b: np.ndarray, h_kij, aao_vox: np.ndarr
     return np.asarray(out)
 
 
-def bernoulli_peak(case: str, root: Path = COA_DIR, mask: np.ndarray = None, q: float = 99.9) -> Dict:
-    """Simplified Bernoulli from the scan: 4 v_peak^2 (mmHg, m/s), v_peak the q-th percentile speed in the descending
-    aorta at its fastest frame (a percentile, not the maximum, so a single noisy voxel cannot set it)."""
+BERNOULLI_VERSION = 2  # 2: 3x3x3 median filter, 99.5th percentile (isolated noisy or aliased voxels cannot set the peak)
+
+
+def bernoulli_peak(case: str, root: Path = COA_DIR, mask: np.ndarray = None, q: float = 99.5) -> Dict:
+    """Simplified Bernoulli from the scan: 4 v_peak^2 (mmHg, m/s). v_peak is the q-th percentile speed in the lumen at
+    the fastest frame, after a 3x3x3 median filter, the way a Doppler reading reports a jet's core rather than one
+    outlier: single voxels with phase noise or aliasing would otherwise reach sqrt(3) x VENC."""
+    from scipy import ndimage
+
     d = load_4dflow(case, root=root)
     mask = segment_lumen(d) if mask is None else mask
     sp = np.linalg.norm(d["velocity"], axis=-1)
-    vpk = max(float(np.percentile(sp[f][mask], q)) for f in range(sp.shape[0]))
+    vpk = max(float(np.percentile(ndimage.median_filter(sp[f], size=3)[mask], q)) for f in range(sp.shape[0]))
     return {"v_peak_ms": vpk, "dp_peak_mmHg": 4.0 * vpk**2}

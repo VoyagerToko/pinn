@@ -31,7 +31,11 @@ CAPTIONS = {
     "stenosis": "No scan measures pressure. The network infers it from the voxel velocities and the equations of motion. The dashed line is the simplified Bernoulli rule used in clinics today, applied to the same scan.",
 }
 CAPTIONS["stenosis_fast"] = CAPTIONS["stenosis"]
+CAPTIONS["coa"] = ("Real scanner data, real catheter. The bars are every phantom case: the catheter's peak pressure drop next to "
+                   "the conventional 4D-flow estimate, the clinical Bernoulli rule, and the two networks, all from the same scan.")
 CAPTION_UNTRAINED = {
+    "coa": "The networks are not trained yet (they train on the desktop and arrive here by themselves). The tank shows the scan's "
+           "measured speed in the real phantom; the bars compare the catheter with the conventional estimates.",
     "stenosis": "The network is not trained yet. The bath shows the scan it will learn from; the sheet shows the CFD truth it will be scored against. Train it with: python scripts/train.py --benchmark stenosis_mri, then restart the server.",
 }
 TAB_NOTE = {
@@ -47,8 +51,10 @@ SHEET = {
     "deeponet": ("Reference: finite differences", ""),
     "stenosis": ("Reference: CFD of the same vessel", "same instant, same colour scale"),
     "stenosis_fast": ("Reference: CFD of the same vessel", "same instant, same colour scale"),
+    "coa": ("Reference: catheter pressure", ""),
 }
 EMPTY = {
+    "coa": "The reference is a catheter: pressure measured upstream and downstream of the coarctation during the scan session, averaged over 30+ beats. The chart compares every method with it.",
     "cylinder_fwd": "FEATFLOW publishes drag, lift and pressure-probe series for this benchmark, not a field. The chart below carries the evidence.",
     "tgv3d": "The reference for the 3D vortex is a DNS dissipation curve (DeBonis 2013), not a field. It is drawn below.",
 }
@@ -150,6 +156,7 @@ class MainWindow(QMainWindow):
         self.curves: Dict[str, Dict] = {}
         self.points: Dict[str, np.ndarray] = {}
         self.lines: Dict = {}
+        self.geom: Dict[str, Dict] = {}
         self.field_ms = 0.0
         self.drop_i = 0
         self._cursor_at = 0.0
@@ -292,7 +299,15 @@ class MainWindow(QMainWindow):
                 self.tank = Tank3D()
                 self.stage.addWidget(self.tank)
             self.stage.setCurrentWidget(self.tank)
-            self.body.set_aspect(1.15)  # the tank's view of the cube
+            if sid == "coa":
+                self.body.set_aspect(0.95)  # an upright aorta
+                if sid in self.geom:
+                    self.tank.configure_vessel(self.geom[sid])
+                else:
+                    self.aux.want_points(sid)
+            else:
+                self.tank.configure_box()
+                self.body.set_aspect(1.15)  # the tank's view of the cube
         else:
             self.stage.setCurrentWidget(self.bath)
             self.bath.domain = domain[:4]
@@ -370,7 +385,7 @@ class MainWindow(QMainWindow):
         k, unit = self.timebar.scale, (" " + self.timebar.unit) if self.timebar.unit else ""
         tt = f"{self.t * k:.2f}{unit}"
         if not s.trained:
-            txt = f"The scan at t = {tt}. Drag the time bar to step through its phases of the heartbeat."
+            txt = f"The scan at t = {tt}; drag the time bar through the beat."
         elif s.play_rate == 0:
             txt = f"Steady flow, Re {self.Re:.0f}: each update asks the network for every particle's velocity."
         elif s.coupled:
@@ -522,8 +537,12 @@ class MainWindow(QMainWindow):
             return
         f, hdr, sid, view = res["fields"], res["hdr"], self.spec.sid, self.view
         if self.spec.dims == 3:
-            if self.tank is not None:
-                self.tank.update_field(f, int(hdr["shape"][0]))
+            if self.tank is None:
+                return
+            if sid == "coa":
+                self._render_vessel(f, view)
+                return
+            self.tank.update_field(f, int(hdr["shape"][0]))
             return
         base_view = "speed" if view in ("pigment", "sensors") else view
         a = render.scalar(f, base_view)
@@ -584,6 +603,30 @@ class MainWindow(QMainWindow):
         else:
             self.panel.set_live("")
 
+    def _render_vessel(self, f, view):
+        """Colour the phantom's lumen voxels by the view, on scales fixed for the scene."""
+        if self.tank.cloud is None:
+            return
+        key = {"mri": "speed_mri", "speed": "speed_net", "pressure": "p_net"}.get(view)
+        vals = f.get(key) if key else None
+        if vals is None:
+            self.tank.update_cloud(None)
+            self.panel.set_live("")
+            return
+        if ("coa", view) not in self.scales:
+            if view == "pressure":
+                m = float(np.nanpercentile(np.abs(vals), 99.5)) * 1.5 or 1.0
+                self.scales[("coa", view)] = (-m, m)
+            else:
+                ref = f.get("speed_mri", vals)
+                self.scales[("coa", view)] = (0.0, float(np.nanpercentile(ref, 99.5)) * 1.2 or 1.0)
+        lo, hi = self.scales[("coa", view)]
+        lut = theme.MAPS["diverging" if view == "pressure" else "sequential"]
+        self.tank.update_cloud(vals, lut, lo, hi, alpha=0.55 if view != "mri" else 0.8)
+        label = {"mri": "scan speed", "speed": "network speed", "pressure": "network pressure, relative to the downstream plane"}[view]
+        unit = "mmHg" if view == "pressure" else "m/s"
+        self.panel.set_live(f"colour: {label}, {lo:.2f} to {hi:.2f} {unit}")
+
     def update_sensors(self):
         pts = self.points.get("inverse")
         if pts is None:
@@ -598,6 +641,12 @@ class MainWindow(QMainWindow):
             self.draw_chart()
 
     def on_points(self, sid: str, data: Dict):
+        if data and sid == "coa":
+            self.geom[sid] = data
+            if self.spec is not None and self.spec.sid == sid and self.tank is not None:
+                self.tank.configure_vessel(data)
+                self.render_field()
+            return
         if data:
             self.points[sid] = np.stack([data["t"], data["x"], data["y"]], -1).astype(np.float32)
             if self.view == "sensors":
@@ -618,6 +667,8 @@ class MainWindow(QMainWindow):
             if line is None or data is None:
                 return
             self.rack.chart.draw("centreline", data, s.pigment, Re=line[0], line=line[1])
+        elif data is not None and s.chart == "coa_compare":
+            self.rack.chart.draw("coa_compare", data, s.pigment, t=self.t)
         elif data is not None and s.chart == "pressure_drop":
             self.rack.chart.draw("pressure_drop", data, s.pigment, t=self.t)
         elif data is not None and s.chart == "lambdas":
@@ -678,7 +729,11 @@ def _apply_server_verdict(spec, m) -> None:
         return
     spec.trained = bool(m.get("trained", True))
     fe = (m.get("metrics") or {}).get("final_eval") or {}
-    if spec.trained and "dp_peak_err_pct" in fe:
+    if spec.trained and "dp_peak_err_pct" in fe and spec.sid == "coa":
+        spec.verdict = "passed" if fe["dp_peak_err_pct"] < 20.0 else "gate missed"
+        spec.headline = f"{fe['dp_peak_err_pct']:.0f} %"
+        spec.headline_label = f"peak drop {fe['dp_peak_pinn_mmHg']:.1f} vs catheter {fe['dp_peak_cath_mmHg']:.1f} mmHg; gate below 20 %"
+    elif spec.trained and "dp_peak_err_pct" in fe:
         spec.verdict = "passed" if fe["dp_peak_err_pct"] < 10.0 else "gate missed"
         spec.headline = f"{fe['dp_peak_err_pct']:.1f} %"
         spec.headline_label = (f"peak pressure-drop error: {fe['dp_peak_pinn_mmHg']:.2f} vs {fe['dp_peak_true_mmHg']:.2f} mmHg; "
@@ -687,7 +742,7 @@ def _apply_server_verdict(spec, m) -> None:
         spec.verdict, spec.headline, spec.headline_label = "trained", "-", "not evaluated yet: final_eval.json is missing"
     else:
         spec.verdict, spec.headline = "not trained", "-"
-        spec.headline_label = "train it: python scripts/train.py --benchmark stenosis_mri"
+        spec.headline_label = "trains on the desktop and arrives here by itself (docs/DESKTOP_TRAINING.md)"
 
 
 def _legend_label(view: str, sid: str) -> str:

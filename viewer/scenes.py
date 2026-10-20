@@ -71,6 +71,12 @@ SCENES: List[SceneSpec] = [
               ["pigment", "mri", "speed", "pressure", "error"], 360, dye_rate=1.0, play_rate=3.0, coupled=True,
               emitter={"x": 0.55, "rows": 24, "per_step": 24}, chart="pressure_drop", evidence="pressure", tab="real"),
 ]
+# real data: a 3D aorta from 4D flow MRI; pigment is released at the upstream catheter plane (seeds from the server)
+SCENES.append(SceneSpec("coa", "Coarctation, real MRI", "Coarctation, real MRI", "not trained", "-",
+                        "peak pressure-drop error against the catheter; gate below 20 %",
+                        ["pigment", "mri", "speed", "pressure"], 8, dye_rate=1.0, play_rate=18.0, coupled=True,
+                        emitter={"seeds": True, "per_step": 48}, chart="coa_compare", evidence="pressure", dims=3, tab="real"))
+BY_ID = {s.sid: s for s in SCENES}
 TABS = [("bench", "The seven benchmarks"), ("real", "Real-world use case")]
 
 

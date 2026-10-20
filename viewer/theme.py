@@ -48,6 +48,7 @@ SCENE_PIGMENT = {
     "deeponet": "verdigris",
     "stenosis": "vermilion",
     "stenosis_fast": "vermilion",
+    "coa": "vermilion",  # the real-world tab: blood, one pigment for its scenes
 }
 # the order drops cycle through when the presenter adds pigment
 DROP_ORDER = ["madder", "indigo", "ochre", "malachite", "cobalt violet", "umber", "verdigris"]
