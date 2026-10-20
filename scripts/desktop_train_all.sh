@@ -56,6 +56,11 @@ run() {  # run <name> <train.py args...>
     python -u scripts/train.py "$@" --steps 300 --lbfgs 0 --workdir "runs_smoke/$name" --set logging.log_every_steps=50 logging.eval_every_steps=300 2>&1 | grep -E "step=|final|Error|error" | tail -4
     return 0
   fi
+  if [[ "$name" == coa_* ]] && [ -f "runs/$name/final_eval.json" ]; then
+    # trained on data from an older preparation (before the background phase correction): keep it aside, retrain
+    v=$(python -c "import json,sys; print(json.load(open(sys.argv[1])).get('data_prep_version', 0))" "runs/$name/final_eval.json")
+    if [ "$v" -lt 3 ]; then say "stale data in $name (prep v$v): moving it to ${name}_stale"; rm -rf "runs/${name}_stale"; mv "runs/$name" "runs/${name}_stale"; fi
+  fi
   if [ ! -f "runs/$name/final_eval.json" ]; then
     say "train: $name"
     python -u scripts/train.py "$@" --workdir "runs/$name" > "runs/$name.log" 2>&1 || { say "FAILED: $name (see runs/$name.log)"; return 1; }

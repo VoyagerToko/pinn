@@ -20,6 +20,7 @@ import numpy as np
 from .data import DATA_DIR
 
 COA_DIR = DATA_DIR / "stanford_coa"
+PREP_VERSION = 3  # 3: background phase correction + speed-based segmentation; older prepared files are redone
 CASES = ["P1_baseline", "P1_severe", "P2_baseline", "P2_severe",
          "P1_baseline_lowflow", "P1_severe_lowflow", "P2_baseline_lowflow", "P2_severe_lowflow"]
 
@@ -163,28 +164,80 @@ def load_4dflow(case: str, series: str = "4DFlow_highRes", root: Path = COA_DIR)
     I, J = np.meshgrid(np.arange(ni), np.arange(nj), indexing="ij")
     xyz = positions[:, None, None, :] + (J[None, ..., None] * sp[1]) * rdir + (I[None, ..., None] * sp[0]) * cdir
     dk = float(np.dot(positions[1] - positions[0], normal))
-    return {"velocity": vel, "magnitude": mag, "xyz_mm": xyz, "t_s": trig / 1000.0, "voxel_mm": (float(sp[0]), float(sp[1]), abs(dk)),
+    vel, bg = correct_background(vel, mag)
+    return {"velocity": vel, "magnitude": mag, "background": bg, "xyz_mm": xyz, "t_s": trig / 1000.0, "voxel_mm": (float(sp[0]), float(sp[1]), abs(dk)),
             "venc_ms": venc / 100.0, "row_dir": rdir, "col_dir": cdir, "normal": normal, "case": case, "series": series}
 
 
 # ------------------------------------------------------------------------------------------------------------
 # segmentation and the training set for one case
 # ------------------------------------------------------------------------------------------------------------
-def segment_lumen(d: Dict, coherence: float = 0.7, bright: float = 1.5, grow: float = 1.35) -> np.ndarray:
-    """Lumen mask: seed = voxels whose flow keeps one direction over the beat (|sum v| / sum |v| > coherence) and whose
-    shading-corrected magnitude is high (contrast-enhanced fluid); keep the largest component, then grow it into
-    connected bright voxels (the head-and-neck branches) and fill holes. Static gel and noise-only air are excluded."""
+def _shading_corrected(mag: np.ndarray) -> np.ndarray:
     from scipy import ndimage
 
-    v, m = d["velocity"], d["magnitude"]
-    mmean = m.mean(0)
-    norm = mmean / (ndimage.gaussian_filter(mmean, 12) + 1e-6)
-    sp = np.linalg.norm(v, axis=-1)
-    coh = np.linalg.norm(v.sum(0), axis=-1) / (sp.sum(0) + 1e-9)
-    seed = ndimage.binary_opening((coh > coherence) & (norm > bright), iterations=1)
+    mmean = mag.mean(0)
+    return mmean / (ndimage.gaussian_filter(mmean, 12) + 1e-6)
+
+
+def correct_background(vel: np.ndarray, mag: np.ndarray, order: int = 2):
+    """Eddy-current background phase correction, the standard first step of 4D-flow processing.
+
+    Static tissue (here the gel around the phantom) should read zero velocity, but eddy currents add a smooth,
+    time-constant offset to the phase. Static voxels: enough signal, not vessel-bright, and among the steadiest over
+    the beat. A polynomial of the given order in the three voxel indices is fitted to their time-mean velocity, per
+    component, and subtracted from every frame. Returns the corrected velocity and a summary of the fit."""
+    norm = _shading_corrected(mag)
+    mmean = mag.mean(0)
+    sd = vel.std(0).max(-1)  # (k, i, j) largest temporal std over components
+    signal = (mmean > np.percentile(mmean, 40)) & (norm < 1.25)
+    steady = sd < np.percentile(sd[signal], 30) if signal.any() else signal
+    static = signal & steady
+    K, I, J = np.nonzero(static)
+    if len(K) < 200:
+        return vel, {"order": order, "static_voxels": int(len(K)), "applied": False}
+    rng = np.random.default_rng(0)
+    pick = rng.choice(len(K), size=min(len(K), 60000), replace=False)
+    shape = np.array(vel.shape[1:4], float)
+
+    def basis(k, i, j):
+        x, y, z = (k / shape[0] - 0.5) * 2, (i / shape[1] - 0.5) * 2, (j / shape[2] - 0.5) * 2
+        cols = [np.ones_like(x)]
+        for p in range(1, order + 1):
+            for a_ in range(p + 1):
+                for b_ in range(p + 1 - a_):
+                    c_ = p - a_ - b_
+                    cols.append(x**a_ * y**b_ * z**c_)
+        return np.stack(cols, -1)
+
+    A = basis(K[pick].astype(float), I[pick].astype(float), J[pick].astype(float))
+    target = vel.mean(0)[K[pick], I[pick], J[pick]]  # (n, 3)
+    coef, *_ = np.linalg.lstsq(A, target, rcond=None)
+    kk, ii, jj = np.meshgrid(*[np.arange(n, dtype=float) for n in vel.shape[1:4]], indexing="ij")
+    field = basis(kk, ii, jj) @ coef  # (k, i, j, 3)
+    before = float(np.abs(vel.mean(0)[static]).mean())
+    out = vel - field[None]
+    after = float(np.abs(out.mean(0)[static]).mean())
+    return out, {"order": order, "static_voxels": int(len(K)), "applied": True, "static_mean_abs_before_ms": before, "static_mean_abs_after_ms": after}
+
+
+def segment_lumen(d: Dict, bright: float = 1.5, grow: float = 1.3, speed_seed: float = 0.12, speed_grow: float = 0.06) -> np.ndarray:
+    """Lumen mask from the background-corrected scan.
+
+    Seed: contrast-bright fluid (shading-corrected magnitude > ``bright``) that moves (time-mean speed > ``speed_seed``
+    m/s); the largest connected piece is the aorta. It then grows into connected voxels that are moderately bright and
+    still moving (> ``grow``, > ``speed_grow``), which adds the head-and-neck branches but not the static gel or the
+    coil-shaded band at the edge of the volume. Holes are filled."""
+    from scipy import ndimage
+
+    norm = _shading_corrected(d["magnitude"])
+    msp = np.linalg.norm(d["velocity"], axis=-1).mean(0)
+    seed = ndimage.binary_opening((norm > bright) & (msp > speed_seed), iterations=1)
     lab, n = ndimage.label(seed)
+    if n == 0:
+        raise ValueError(f"{d.get('case')}: no moving, contrast-bright fluid found")
     seed = lab == (int(np.argmax(ndimage.sum(seed, lab, range(1, n + 1)))) + 1)
-    lum = ndimage.binary_propagation(seed, mask=ndimage.binary_opening(norm > grow, iterations=1) | seed)
+    grow_ok = ndimage.binary_opening((norm > grow) & (msp > speed_grow), iterations=1)
+    lum = ndimage.binary_propagation(seed, mask=grow_ok | seed)
     return ndimage.binary_fill_holes(lum)
 
 
@@ -311,6 +364,7 @@ def prepare_case(case: str, out: Path, root: Path = COA_DIR, z_aao: float = None
     out.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out, t_s=d["t_s"], vel=loc[:, K, I, J, :].astype(np.float32), pos_mm=pos_mm.astype(np.float32),
                         wall_mm=wall_mm.astype(np.float32), aao_mm=aao.astype(np.float32), dao_mm=dao.astype(np.float32),
+                        prep_version=np.int64(PREP_VERSION),
                         aao_normal=n_aao_loc, dao_normal=n_dao_loc, aao_shift_mm=np.float64(aao_shift_mm),
                         aao_flux_mLs=np.float64(q_plane), meter_flow_mLs=np.float64(q_meter),
                         voxel_mm=np.array([sp_j, sp_i, dk]), frame_window_s=np.float64(np.median(np.diff(d["t_s"]))),

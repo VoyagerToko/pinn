@@ -17,7 +17,7 @@ sys.path.insert(0, str(ROOT))
 
 import numpy as np  # noqa: E402
 
-from pinnflow.coa_phantom import CASES, COA_DIR, beat_average, load_4dflow, load_catheter, prepare_case, segment_lumen  # noqa: E402
+from pinnflow.coa_phantom import CASES, COA_DIR, PREP_VERSION, beat_average, load_4dflow, load_catheter, prepare_case, segment_lumen  # noqa: E402
 
 
 def qa(case: str, out_png: Path) -> dict:
@@ -69,7 +69,8 @@ def main():
     for case in (CASES if args.all else [args.case]):
         npz = out_dir / f"{case}.npz"
         try:
-            if args.force or not npz.exists():
+            stale = npz.exists() and int(np.load(npz).get("prep_version", 0)) < PREP_VERSION  # an older pipeline wrote it
+            if args.force or stale or not npz.exists():
                 info = prepare_case(case, npz)
                 print(case, {k: (round(v, 2) if isinstance(v, float) else v) for k, v in info.items()}, flush=True)
             check = qa(case, out_dir / f"{case}_qa.png")

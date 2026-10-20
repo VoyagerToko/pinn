@@ -11,7 +11,7 @@ shows the results in the live viewer. Finished runs travel through a private Git
 
 | run | what | why |
 |---|---|---|
-| `stenosis_mri_fast` | synthetic stenosis, 70% narrowing, Re 300, a ~1.6 m/s jet, ~10 mmHg | the regime the clinical Doppler rule (4 v^2) was made for |
+| `stenosis_mri_fast` | synthetic stenosis, 70% narrowing, Re 300, a ~1.1 m/s jet, 4.2 mmHg peak drop | closer to the fast jets the clinical Doppler rule (4 v^2) was made for |
 | `coa_P2_baseline`, `coa_P2_baseline_eddy` | real 4D flow MRI of a coarctation phantom, scored against catheter pressure | laminar network vs network with a learned eddy viscosity |
 | `coa_P2_severe`, `coa_P2_severe_eddy` | the same for the severe P2 phantom | |
 | `coa_<other six cases>_eddy`, then `coa_<other six>` | P1 cases and the low-flow cases | the full comparison |

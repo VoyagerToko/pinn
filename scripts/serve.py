@@ -68,7 +68,7 @@ REGISTRY: Dict[str, Dict] = {
         "status": "not trained",
         "gate": "peak trans-stenotic pressure drop within 10% of the CFD truth",
         "measured": "",
-        "summary": "The same 6 mm artery narrowed by 70%, at twice the flow: a jet of about 1.6 m/s and a pressure drop near 10 mmHg, the regime the clinical Doppler rule was built for. The network sees only the simulated scan.",
+        "summary": "The same 6 mm artery narrowed by 70%, at twice the flow: a jet of about 1.1 m/s and a peak pressure drop of 4.2 mmHg, closer to the fast jets the clinical Doppler rule was built for. The network sees only the simulated scan.",
         "reference": "CFD of the same vessel (pinnflow/vessel.py)",
         "controls": {"t": [0.0, 24.0]},
     },

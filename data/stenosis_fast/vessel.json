@@ -1,0 +1,52 @@
+{
+  "vessel": {
+    "length": 18.0,
+    "xc": 3.0,
+    "half_len": 1.0,
+    "severity": 0.7,
+    "Re": 300.0,
+    "period": 23.972602739726025,
+    "harmonics": [
+      [
+        0.6,
+        0.0
+      ],
+      [
+        0.2,
+        0.5
+      ]
+    ],
+    "fov": [
+      0.5,
+      11.5
+    ],
+    "proximal": 1.0,
+    "D_m": 0.006,
+    "nu_m2s": 3.5e-06,
+    "rho": 1060.0,
+    "physical": {
+      "U_ms": 0.175,
+      "D_mm": 6.0,
+      "period_s": 0.821917808219178,
+      "heart_rate_bpm": 73.0,
+      "mmHg_per_unit": 0.24348944660296123
+    }
+  },
+  "cfd": {
+    "N": 60,
+    "periods": 3,
+    "periodicity_error": 0.0,
+    "seconds": 3393.890350341797
+  },
+  "mri": {
+    "voxel": 0.1,
+    "phases": 24,
+    "snr": 20.0,
+    "seed": 0,
+    "n_samples": 24768
+  },
+  "summary": {
+    "dp_peak_truth_mmHg": 4.153697967529297,
+    "dp_peak_bernoulli_mmHg": 4.986583232879639
+  }
+}

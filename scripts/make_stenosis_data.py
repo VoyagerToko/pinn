@@ -5,7 +5,7 @@
     python scripts/make_stenosis_data.py --snr 10 --out data/stenosis_snr10
     python scripts/make_stenosis_data.py --voxel 0.2        # 1.2 mm voxels (must be a multiple of 1/N)
     python scripts/make_stenosis_data.py --Re 300 --severity 0.7 --bpm 73 --N 60 --length 18 --fov 0.5 11.5 --out data/stenosis_fast
-                                                            # the Doppler regime: a ~1.6 m/s jet, ~10 mmHg
+                                                            # a faster jet: ~1.1 m/s, 4.2 mmHg peak drop
 
 About 8 minutes on a laptop CPU at the default grid (N = 50 cells per diameter, three cardiac cycles; the last is
 kept). The training problem reads the directory given by problem.data_dir (default data/stenosis).

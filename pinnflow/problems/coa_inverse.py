@@ -211,6 +211,7 @@ class CoarctationMRIInversePINN(Problem):
         if self.eddy:
             nut = self.predict(params, np.asarray(self.uniform_collocation(jax.random.PRNGKey(0), 8192)))[:, 4]
             extra = {"nu_t_mean_over_nu": float(nut.mean() * self.Re), "nu_t_p99_over_nu": float(np.percentile(nut, 99) * self.Re)}
+        extra["data_prep_version"] = int(self.d.get("prep_version", 0))
         return {**extra,
             "dp_peak_pinn_mmHg": peak, "dp_peak_cath_mmHg": self.cath_peak,
             "dp_peak_err_pct": 100 * abs(peak - self.cath_peak) / self.cath_peak,
