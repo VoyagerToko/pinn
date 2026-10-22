@@ -59,7 +59,8 @@ run() {  # run <name> <train.py args...>
   if [[ "$name" == coa_* ]] && [ -f "runs/$name/final_eval.json" ]; then
     # trained on data from an older preparation (before the background phase correction): keep it aside, retrain
     v=$(python -c "import json,sys; print(json.load(open(sys.argv[1])).get('data_prep_version', 0))" "runs/$name/final_eval.json")
-    if [ "$v" -lt 3 ]; then say "stale data in $name (prep v$v): moving it to ${name}_stale"; rm -rf "runs/${name}_stale"; mv "runs/$name" "runs/${name}_stale"; fi
+    cur=$(python -c "from pinnflow.coa_phantom import PREP_VERSION; print(PREP_VERSION)")
+    if [ "$v" -lt "$cur" ]; then say "stale data in $name (prep v$v): moving it to ${name}_stale"; rm -rf "runs/${name}_stale"; mv "runs/$name" "runs/${name}_stale"; fi
   fi
   if [ ! -f "runs/$name/final_eval.json" ]; then
     say "train: $name"

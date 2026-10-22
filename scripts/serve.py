@@ -310,6 +310,13 @@ class Scene:
             bch = self.problem.bench
             self.domain = [0.0, bch.length, 0.0, bch.height]
         elif b == "coa_mri":
+            from pinnflow.coa_phantom import PREP_VERSION
+
+            fe0 = self.metrics["final_eval"]
+            if self.trained and int(fe0.get("data_prep_version", 0)) < PREP_VERSION:
+                print(f"[serve] {self.id}: {self.workdir.name} was trained on outdated data (prep v{fe0.get('data_prep_version', 0)}); serving the scan only")
+                self.trained = False
+                self.metrics["final_eval"] = {}
             self.problem = PROBLEMS[b](self.cfg)
             self.params = self._restore(self.problem, self.workdir / "latest.msgpack") if self.trained else None
             pr = self.problem
@@ -612,7 +619,9 @@ class Scene:
             r = dict(rows.get(case, {}), case=case, **b)
             for tag, run in (("pinn_laminar", f"coa_{case}"), ("pinn_eddy", f"coa_{case}_eddy")):
                 fe = read_json(ROOT / "runs" / run / "final_eval.json")
-                if "dp_peak_pinn_mmHg" in fe:
+                from pinnflow.coa_phantom import PREP_VERSION
+
+                if "dp_peak_pinn_mmHg" in fe and int(fe.get("data_prep_version", 0)) >= PREP_VERSION:
                     r[f"{tag}_peak_mmHg"] = fe["dp_peak_pinn_mmHg"]
             out["rows"].append(r)
         self._cache["curve"] = out

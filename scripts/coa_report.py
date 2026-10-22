@@ -72,7 +72,9 @@ def main():
         r = {"case": case, **base[case]}
         for tag, run in (("pinn_laminar", f"coa_{case}"), ("pinn_eddy", f"coa_{case}_eddy")):
             fe = ROOT / "runs" / run / "final_eval.json"
-            r[f"{tag}_peak_mmHg"] = json.loads(fe.read_text())["dp_peak_pinn_mmHg"] if fe.exists() else None
+            ev = json.loads(fe.read_text()) if fe.exists() else {}
+            current = int(ev.get("data_prep_version", 0)) >= PREP_VERSION
+            r[f"{tag}_peak_mmHg"] = ev["dp_peak_pinn_mmHg"] if ev and current else None
         rows.append(r)
     methods = [("ppe", "conventional 4D flow (pressure Poisson)"), ("bernoulli", "simplified Bernoulli 4 v^2"),
                ("pinn_laminar", "network, laminar"), ("pinn_eddy", "network, learned eddy viscosity")]

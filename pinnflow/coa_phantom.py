@@ -20,7 +20,7 @@ import numpy as np
 from .data import DATA_DIR
 
 COA_DIR = DATA_DIR / "stanford_coa"
-PREP_VERSION = 3  # 3: background phase correction + speed-based segmentation; older prepared files are redone
+PREP_VERSION = 4  # 4: velocity component signs fixed from the data (3: background correction, speed segmentation)
 CASES = ["P1_baseline", "P1_severe", "P2_baseline", "P2_severe",
          "P1_baseline_lowflow", "P1_severe_lowflow", "P2_baseline_lowflow", "P2_severe_lowflow"]
 
@@ -165,8 +165,40 @@ def load_4dflow(case: str, series: str = "4DFlow_highRes", root: Path = COA_DIR)
     xyz = positions[:, None, None, :] + (J[None, ..., None] * sp[1]) * rdir + (I[None, ..., None] * sp[0]) * cdir
     dk = float(np.dot(positions[1] - positions[0], normal))
     vel, bg = correct_background(vel, mag)
-    return {"velocity": vel, "magnitude": mag, "background": bg, "xyz_mm": xyz, "t_s": trig / 1000.0, "voxel_mm": (float(sp[0]), float(sp[1]), abs(dk)),
-            "venc_ms": venc / 100.0, "row_dir": rdir, "col_dir": cdir, "normal": normal, "case": case, "series": series}
+    out = {"velocity": vel, "magnitude": mag, "background": bg, "xyz_mm": xyz, "t_s": trig / 1000.0, "voxel_mm": (float(sp[0]), float(sp[1]), abs(dk)),
+           "venc_ms": venc / 100.0, "row_dir": rdir, "col_dir": cdir, "normal": normal, "case": case, "series": series}
+    out["velocity"], out["velocity_signs"] = fix_component_signs(out)
+    return out
+
+
+def fix_component_signs(d: Dict):
+    """Choose the signs of the velocity components along the image row and slice directions from the data itself.
+
+    The stated encoding directions fix each component's axis but, in this export, not reliably its sign. With the
+    wrong signs the scan's own streamlines leave the vessel within a few centimetres; with the right ones the flow is
+    nearly divergence-free. The component along the image columns (head-foot here) is anchored by the flow meter
+    (prepare_coa.py checks it), so the search covers the 4 sign choices of the other two components and keeps the one
+    with the smallest RMS divergence of the peak-flow frame inside the (sign-independent) lumen mask."""
+    from scipy import ndimage
+
+    v = d["velocity"]
+    mask = segment_lumen(d)
+    inner = ndimage.binary_erosion(mask, iterations=2)
+    sp_i, sp_j, dk = d["voxel_mm"]
+    f = int(np.argmax([np.linalg.norm(v[t][mask], axis=-1).mean() for t in range(v.shape[0])]))
+    comp = [np.einsum("kijc,c->kij", v[f], e) for e in (d["row_dir"], d["col_dir"], d["normal"])]
+    best = None
+    for sa in (1.0, -1.0):
+        for sc in (1.0, -1.0):
+            div = (np.gradient(sa * comp[0], sp_j, axis=2) + np.gradient(comp[1], sp_i, axis=1)
+                   + np.gradient(sc * comp[2], dk, axis=0))
+            r = float(np.sqrt(np.mean(div[inner] ** 2)))
+            if best is None or r < best[0]:
+                best = (r, sa, sc)
+    _, sa, sc = best
+    E = np.stack([d["row_dir"], d["col_dir"], d["normal"]])  # rows: the local axes in patient coordinates
+    loc = np.einsum("tkijc,ac->tkija", v, E) * np.array([sa, 1.0, sc])
+    return np.einsum("tkija,ac->tkijc", loc, E), {"row": sa, "col": 1.0, "slice": sc, "rms_divergence": best[0]}
 
 
 # ------------------------------------------------------------------------------------------------------------
@@ -365,6 +397,7 @@ def prepare_case(case: str, out: Path, root: Path = COA_DIR, z_aao: float = None
     np.savez_compressed(out, t_s=d["t_s"], vel=loc[:, K, I, J, :].astype(np.float32), pos_mm=pos_mm.astype(np.float32),
                         wall_mm=wall_mm.astype(np.float32), aao_mm=aao.astype(np.float32), dao_mm=dao.astype(np.float32),
                         prep_version=np.int64(PREP_VERSION),
+                        velocity_signs=np.array([d["velocity_signs"]["row"], d["velocity_signs"]["col"], d["velocity_signs"]["slice"]]),
                         aao_normal=n_aao_loc, dao_normal=n_dao_loc, aao_shift_mm=np.float64(aao_shift_mm),
                         aao_flux_mLs=np.float64(q_plane), meter_flow_mLs=np.float64(q_meter),
                         voxel_mm=np.array([sp_j, sp_i, dk]), frame_window_s=np.float64(np.median(np.diff(d["t_s"]))),
