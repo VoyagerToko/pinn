@@ -72,12 +72,29 @@ SCENES: List[SceneSpec] = [
               emitter={"x": 0.55, "rows": 24, "per_step": 24}, chart="pressure_drop", evidence="pressure", tab="real"),
 ]
 # real data: a 3D aorta from 4D flow MRI; pigment is released at the upstream catheter plane (seeds from the server)
-SCENES.append(SceneSpec("coa", "Coarctation, real MRI", "Coarctation, real MRI", "not trained", "-",
+SCENES.append(SceneSpec("coa_p2b", "Coarctation, P2 baseline, laminar", "P2 baseline, laminar", "not trained", "-",
+                        "peak pressure-drop error against the catheter; gate below 20 %",
+                        ["pigment", "mri", "speed", "pressure"], 8, dye_rate=1.0, play_rate=18.0, coupled=True,
+                        emitter={"seeds": True, "per_step": 48}, chart="coa_compare", evidence="pressure", dims=3, tab="real"))
+SCENES.append(SceneSpec("coa_p2b_eddy", "Coarctation, P2 baseline, eddy", "P2 baseline, eddy", "not trained", "-",
+                        "peak pressure-drop error against the catheter; gate below 20 %",
+                        ["pigment", "mri", "speed", "pressure"], 8, dye_rate=1.0, play_rate=18.0, coupled=True,
+                        emitter={"seeds": True, "per_step": 48}, chart="coa_compare", evidence="pressure", dims=3, tab="real"))
+SCENES.append(SceneSpec("coa_p2s", "Coarctation, P2 severe, laminar", "P2 severe, laminar", "not trained", "-",
+                        "peak pressure-drop error against the catheter; gate below 20 %",
+                        ["pigment", "mri", "speed", "pressure"], 8, dye_rate=1.0, play_rate=18.0, coupled=True,
+                        emitter={"seeds": True, "per_step": 48}, chart="coa_compare", evidence="pressure", dims=3, tab="real"))
+SCENES.append(SceneSpec("coa_p2s_eddy", "Coarctation, P2 severe, eddy", "P2 severe, eddy", "not trained", "-",
                         "peak pressure-drop error against the catheter; gate below 20 %",
                         ["pigment", "mri", "speed", "pressure"], 8, dye_rate=1.0, play_rate=18.0, coupled=True,
                         emitter={"seeds": True, "per_step": 48}, chart="coa_compare", evidence="pressure", dims=3, tab="real"))
 BY_ID = {s.sid: s for s in SCENES}
 TABS = [("bench", "The seven benchmarks"), ("real", "Real-world use case")]
+
+
+def is_vessel(sid: str) -> bool:
+    """The real coarctation phantom scenes (3D aorta from 4D flow MRI)."""
+    return sid.startswith("coa_")
 
 
 def scenes_in(tab: str) -> List[SceneSpec]:

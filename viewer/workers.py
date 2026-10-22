@@ -22,7 +22,7 @@ from viewer import theme
 from viewer.client import ROOT, Client
 
 CACHE = ROOT / "runs" / "_viewer_cache"
-NO_CURVE_CACHE = {"coa"}  # its comparison table grows as each phantom case arrives from the training machine
+NO_CURVE_CACHE = {"coa_p2b", "coa_p2b_eddy", "coa_p2s", "coa_p2s_eddy"}  # the comparison grows as phantom runs arrive
 
 
 def scene_colors(spec: S.SceneSpec) -> np.ndarray:

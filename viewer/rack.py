@@ -241,7 +241,7 @@ class EvidenceChart(QWidget):
                           handlelength=1.8, columnspacing=1.4, borderaxespad=0.2)
                 self.cursor = self._cursor(ax, (t or 0.0) * ks)
             elif kind == "coa_compare":
-                ax = self._ax("Peak pressure drop across the coarctation, every phantom case", pad=30)
+                ax = self._ax("Peak pressure drop across the coarctation, every phantom case", pad=50)
                 rows = sorted(data.get("rows", []), key=lambda r: r["case"])
                 methods = [("catheter_peak_mmHg", "catheter", ink, 1.0), ("ppe_peak_mmHg", "conventional 4D flow", theme.STONE, 1.0),
                            ("bernoulli_peak_mmHg", "Bernoulli 4 v^2", theme.HAIR, 0.55), ("pinn_laminar_peak_mmHg", "network, laminar", pigment, 0.45),

@@ -31,8 +31,11 @@ CAPTIONS = {
     "stenosis": "No scan measures pressure. The network infers it from the voxel velocities and the equations of motion. The dashed line is the simplified Bernoulli rule used in clinics today, applied to the same scan.",
 }
 CAPTIONS["stenosis_fast"] = CAPTIONS["stenosis"]
-CAPTIONS["coa"] = ("Real scanner data, real catheter. The bars are every phantom case: the catheter's peak pressure drop next to "
+_COA_CAPTION = ("Real scanner data, real catheter. The bars are every phantom case: the catheter's peak pressure drop next to "
                    "the conventional 4D-flow estimate, the clinical Bernoulli rule, and the two networks, all from the same scan.")
+for _sid in ['coa_p2b', 'coa_p2b_eddy', 'coa_p2s', 'coa_p2s_eddy']:
+    CAPTIONS[_sid] = _COA_CAPTION + (" This network uses laminar physics at the fluid's own viscosity." if not _sid.endswith("_eddy") else
+                                     " This network may add a learned eddy viscosity where the jet spreads and decays: the turbulent loss laminar physics lacks.")
 CAPTION_UNTRAINED = {
     "coa": "The networks are not trained yet (they train on the desktop and arrive here by themselves). The tank shows the scan's "
            "measured speed in the real phantom; the bars compare the catheter with the conventional estimates.",
@@ -51,13 +54,21 @@ SHEET = {
     "deeponet": ("Reference: finite differences", ""),
     "stenosis": ("Reference: CFD of the same vessel", "same instant, same colour scale"),
     "stenosis_fast": ("Reference: CFD of the same vessel", "same instant, same colour scale"),
-    "coa": ("Reference: catheter pressure", ""),
+    "coa_p2b": ("Reference: catheter pressure", ""),
+    "coa_p2b_eddy": ("Reference: catheter pressure", ""),
+    "coa_p2s": ("Reference: catheter pressure", ""),
+    "coa_p2s_eddy": ("Reference: catheter pressure", ""),
 }
 EMPTY = {
     "coa": "The reference is a catheter: pressure measured upstream and downstream of the coarctation during the scan session, averaged over 30+ beats. The chart compares every method with it.",
     "cylinder_fwd": "FEATFLOW publishes drag, lift and pressure-probe series for this benchmark, not a field. The chart below carries the evidence.",
     "tgv3d": "The reference for the 3D vortex is a DNS dissipation curve (DeBonis 2013), not a field. It is drawn below.",
 }
+
+
+for _sid in ['coa_p2b', 'coa_p2b_eddy', 'coa_p2s', 'coa_p2s_eddy']:
+    EMPTY[_sid] = EMPTY["coa"]
+    CAPTION_UNTRAINED[_sid] = CAPTION_UNTRAINED["coa"]
 
 
 class Connector(QThread):
@@ -299,7 +310,7 @@ class MainWindow(QMainWindow):
                 self.tank = Tank3D()
                 self.stage.addWidget(self.tank)
             self.stage.setCurrentWidget(self.tank)
-            if sid == "coa":
+            if S.is_vessel(sid):
                 self.body.set_aspect(0.95)  # an upright aorta
                 if sid in self.geom:
                     self.tank.configure_vessel(self.geom[sid])
@@ -539,7 +550,7 @@ class MainWindow(QMainWindow):
         if self.spec.dims == 3:
             if self.tank is None:
                 return
-            if sid == "coa":
+            if S.is_vessel(sid):
                 self._render_vessel(f, view)
                 return
             self.tank.update_field(f, int(hdr["shape"][0]))
@@ -613,18 +624,19 @@ class MainWindow(QMainWindow):
             self.tank.update_cloud(None)
             self.panel.set_live("")
             return
-        if ("coa", view) not in self.scales:
+        sid = self.spec.sid
+        if (sid, view) not in self.scales:
             if view == "pressure":
                 m = float(np.nanpercentile(np.abs(vals), 99.5)) * 1.5 or 1.0
-                self.scales[("coa", view)] = (-m, m)
+                self.scales[(sid, view)] = (-m, m)
             else:
                 ref = f.get("speed_mri", vals)
-                self.scales[("coa", view)] = (0.0, float(np.nanpercentile(ref, 99.5)) * 1.2 or 1.0)
-        lo, hi = self.scales[("coa", view)]
+                self.scales[(sid, view)] = (0.0, float(np.nanpercentile(ref, 99.5)) * 1.2 or 1.0)
+        lo, hi = self.scales[(sid, view)]
         lut = theme.MAPS["diverging" if view == "pressure" else "sequential"]
         self.tank.update_cloud(vals, lut, lo, hi, alpha=0.55 if view != "mri" else 0.8)
         label = {"mri": "scan speed", "speed": "network speed", "pressure": "network pressure"}[view]
-        rng = f"+-{hi:.0f} mmHg" if view == "pressure" else f"0 to {hi:.1f} m/s"
+        rng = f"+-{hi:.2g} mmHg" if view == "pressure" else f"0 to {hi:.2g} m/s"
         self.panel.set_live(f"colour: {label}, {rng}")
 
     def update_sensors(self):
@@ -641,7 +653,7 @@ class MainWindow(QMainWindow):
             self.draw_chart()
 
     def on_points(self, sid: str, data: Dict):
-        if data and sid == "coa":
+        if data and S.is_vessel(sid):
             self.geom[sid] = data
             if self.spec is not None and self.spec.sid == sid and self.tank is not None:
                 self.tank.configure_vessel(data)
@@ -729,7 +741,7 @@ def _apply_server_verdict(spec, m) -> None:
         return
     spec.trained = bool(m.get("trained", True))
     fe = (m.get("metrics") or {}).get("final_eval") or {}
-    if spec.trained and "dp_peak_err_pct" in fe and spec.sid == "coa":
+    if spec.trained and "dp_peak_err_pct" in fe and spec.sid.startswith("coa_"):
         spec.verdict = "passed" if fe["dp_peak_err_pct"] < 20.0 else "gate missed"
         spec.headline = f"{fe['dp_peak_err_pct']:.0f} %"
         spec.headline_label = f"peak drop {fe['dp_peak_pinn_mmHg']:.1f} vs catheter {fe['dp_peak_cath_mmHg']:.1f} mmHg; gate below 20 %"

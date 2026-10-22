@@ -230,7 +230,7 @@ class SceneRail(KeyboardFocus, QWidget):
             p.setPen(theme.qcolor(theme.INK_SOFT if s.verdict != "failed" else theme.MADDER_TEXT))
             p.drawText(QRectF(x, r.top() + 32, r.width() - 60, 18), Qt.AlignLeft | Qt.AlignVCenter, word)
             p.setOpacity(1.0)
-        if self.note and cells:
+        if self.note and cells and self.width() - cells[-1].right() > 280:  # only where there is room for it
             p.setFont(theme.font("text", 14, 400))
             p.setPen(theme.qcolor(theme.INK_SOFT))
             x0 = cells[-1].right() + 24

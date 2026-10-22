@@ -67,6 +67,16 @@ def check(repo: str, owner: str) -> int:
         return 0
     seen = set(SEEN.read_text().split()) if SEEN.exists() else set()
     new = sorted((x for x in json.loads(r.stdout or "[]") if x["tagName"] not in seen), key=lambda x: x["createdAt"])
+    # several releases of one run (a report republished after every run): fetch only the newest, mark the rest as seen
+    run_of = lambda tag: tag.rsplit("-", 2)[0]
+    newest = {}
+    for x in new:
+        newest[run_of(x["tagName"])] = x
+    for x in new:
+        if newest[run_of(x["tagName"])] is not x:
+            with open(SEEN, "a", encoding="utf-8") as f:
+                f.write(x["tagName"] + "\n")
+    new = list(newest.values())
     got = 0
     for rel in new:
         tag = rel["tagName"]

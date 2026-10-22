@@ -85,7 +85,9 @@ class Tank3D(QWidget):
         # the scan's frame: a = image columns, b = image rows (the head at small b), c = slices; look along c, head up
         c = 0.5 * (pos.min(0) + pos.max(0))
         span = float(np.ptp(pos, axis=0).max())
-        pl.camera_position = [(float(c[0]), float(c[1]), float(c[2] - 2.6 * span)), tuple(float(v) for v in c), (0.0, -1.0, 0.0)]
+        # look along +c (from the -c side) with the head up, then fit the whole vessel in view
+        pl.view_vector((0.0, 0.0, -1.0), viewup=(0.0, -1.0, 0.0))
+        pl.reset_camera()
         self.orbit = False
         self.mode = "vessel"
         pl.render()
