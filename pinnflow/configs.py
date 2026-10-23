@@ -199,6 +199,10 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         p.eddy_viscosity = False  # True: learn nu_t(t, x) (5th output) for unresolved turbulent mixing in the jet
         p.nu_t_scale = 0.01
         p.nu_t_reg_weight = 0.01  # fixed weight of the mean-nu_t penalty; lower it if nu_t collapses to 0
+        # Smagorinsky eddy viscosity nu_t = (C_s Delta)^2 |S| from the resolved strain rate, instead of a learned field (the
+        # learned one collapses to 0, STATUS.md 2026-10-23). 0 = off; 0.17 is Lilly's value. Delta defaults to the voxel size.
+        p.smagorinsky_cs = 0.0
+        p.smagorinsky_delta_mm = None
         # the pressure from its own network (periodic time harmonics, isotropic multi-scale space features), trained jointly;
         # the shared fourth output left the systolic acceleration in the momentum residual (STATUS.md, 2026-10-23)
         p.pressure_net = True

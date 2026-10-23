@@ -480,6 +480,38 @@ is not meaningful then (the JAX peak is).
       turbulent part of the catheter's drop needs a different turbulence term, for example nu_t tied to the resolved
       flow (a mixing-length or Smagorinsky form from the velocity gradients) instead of a free output. Not decided; the
       desktop queue stays stopped.
+- **Smagorinsky eddy viscosity (`problem.smagorinsky_cs`, desktop, 2026-10-23).** nu_t = (C_s Delta)^2 |S| from the
+  resolved strain rate, Delta = the voxel (1.80 mm), in the same stress divergence as the learned field; its gradient
+  by forward mode through |S|. Checked on the CPU before training: grad nu_t against central differences 1e-3,
+  C_s = 1e-6 reproduces the laminar residual exactly, all losses finite. Off by default.
+  - **Cold tests, C_s 0.17 (Lilly), not tuned,** P2 baseline, prep v5, pressure network, RAD, 20k steps, not published.
+    The scan blur averaged over 4 points per voxel-frame (`runs/_test_smag_sub4`) or 16 (`runs/_test_smag_sub16`):
+
+    | step | sub 4: peak | mean | nu_t/nu mean | p99 | fit | sub 16: peak | mean | nu_t/nu mean | p99 | fit |
+    |---|---|---|---|---|---|---|---|---|---|---|
+    | 5000 | 1.91 | 0.41 | 1.29 | 5.2 | 0.405 | 2.28 | 0.59 | 1.35 | 5.4 | 0.403 |
+    | 10000 | 4.91 | 0.99 | 1.27 | 7.7 | 0.359 | 3.31 | 0.76 | 1.35 | 8.2 | 0.360 |
+    | 15000 | 5.17 | 0.96 | 1.27 | 8.4 | 0.350 | 4.27 | 0.97 | 1.34 | 9.0 | 0.354 |
+    | 20000 | **6.05** | 0.92 | 1.18 | 8.8 | 0.352 | **5.30** | 1.04 | 1.22 | 9.6 | 0.345 |
+
+    - At 20k, all runs on the pressure network: laminar 5.28 / 0.86, learned nu_t 5.48 / 0.86 and 5.63 / 0.95,
+      Smagorinsky 6.05 / 0.92 and 5.30 / 1.04 (peak / mean, mmHg; catheter 13.1 / 3.68; Bernoulli 8.0). The
+      Smagorinsky viscosity does not collapse (nu_t/nu ~1.2 mean, 9-10 at p99) and adds a little loss: +0.06-0.18 mmHg
+      on the mean, in line with an a priori estimate on the laminar run's flow (+0.29 mean, at most +2.1 just after peak
+      flow). The 16-point blur did not sharpen the jet (velocity fit as the 4-point run); the order of the two runs
+      changed between evaluations, so their 0.75 mmHg difference at 20k is within the spread of single runs.
+    - The resolved jet sets nu_t: its shear is that of a voxel-smoothed jet, so nu_t stays near the fluid's own
+      viscosity. C_s = 0.17 assumes resolved small-scale turbulence; at 1.8 mm it is likely too low, but raising it is
+      a calibration: do it on one case, freeze it, and score the other seven.
+- **The ceiling is the scan's resolution (2026-10-23).** The scan's jet peaks at 1.42 m/s (the 99.5th percentile
+  through a 3x3x3 median); the catheter's 13.1 mmHg would need about 1.8 m/s in 4 v^2. Bernoulli 8.0, pressure Poisson
+  7.9 and the stand-alone pressure fit 7.3 agree, and the source publication reports conventional 4D flow at slope
+  0.63. The networks (5.3-6.1 at 20k, still rising) are below that ceiling, so longer training should close part of
+  the gap; above it needs a sharper jet than the scan holds.
+  - **The 2D phase-contrast series do not resolve the jet.** P2 baseline has three single-slice through-plane series,
+    INLET, OUTLET (13 cm lower) and BRANCHES (head vessels): 28 frames per beat (37.5 ms) against the 4D flow's 17,
+    but 1.875 mm pixels and 6 mm slices, near-axial planes for flow measurement. They would add timing and the flow
+    split as another voxel-averaged data term on the same network, not the jet's peak speed. Not built.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`docs/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
@@ -492,8 +524,10 @@ is not meaningful then (the JAX peak is).
   (correlation 0.96 with the catheter's waveform), so the cause is the joint training. The separate pressure network
   passed its desktop test (5.28 mmHg at 20k from scratch, still rising; "Real data"). With it the free eddy viscosity
   still collapses to ~0 (nu_t_reg 0.01 and 0.001; 5.48 and 5.63 mmHg, mean 0.86-0.95 against 3.68), so the turbulent
-  loss is not captured. Next is a decision on the turbulence term; the desktop queue stays stopped until then (prep v5
-  retrains all 16, about 17 h).
+  loss is not captured. A Smagorinsky term computed from the flow does not collapse but is weak at this resolution
+  (6.05 and 5.30 mmHg at 20k, mean 0.92-1.04). The remaining gap is mostly the scan's resolution ("The ceiling").
+  Open choices: a 60k run of the Smagorinsky network, a C_s calibrated on one case and scored on seven, the 2D series
+  as a timing term. The desktop queue stays stopped until one is chosen (prep v5 retrains all 16, about 17 h).
 - Desktop stability: Windows restarted without a clean shutdown (Kernel-Power 41, no bugcheck) on 2026-10-20 (twice),
   10-21 and 10-22 (twice); four of the five during GPU training. Suspect the power supply or the GPU's 16-pin cable under
   load spikes. `nvidia-smi -pl 250` (the card's minimum, admin) would cap them. A restart kills the run in progress;

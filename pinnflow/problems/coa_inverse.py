@@ -18,6 +18,10 @@ coarctation jet happens far below the voxel size; its momentum exchange (how fas
 data) is what nu_t is inferred from, as the wake benchmark infers a viscosity. Without it, a laminar momentum balance at
 the molecular viscosity recovers almost all the jet's pressure downstream and the trans-coarctation drop vanishes.
 
+With ``problem.smagorinsky_cs`` > 0 the eddy viscosity is not learned but computed from the resolved flow,
+nu_t = (C_s Delta)^2 |S| with |S| = sqrt(2 S_ij S_ij) and Delta the voxel size, in the same stress divergence. It cannot be
+switched off where the flow shears (the learned field collapsed to ~0 in every run) and needs no penalty.
+
 With ``problem.pressure_net`` the pressure comes from a second, separate network instead of the velocity network's fourth
 output: exactly periodic over the beat through explicit time harmonics, with isotropic multi-scale Fourier features in
 space (``PressureMLP``, ``_p_features``). Trained jointly with the velocity, it is what the momentum terms act on. The
@@ -107,6 +111,13 @@ class CoarctationMRIInversePINN(Problem):
         self.eddy = bool(p.get("eddy_viscosity", False))
         self.nu_t_scale = float(p.get("nu_t_scale", 0.01))  # ~30 x the molecular 1/Re at O(1) network output
         self.n_sub = int(p.get("sub_samples", 4))
+        # Smagorinsky eddy viscosity (problem.smagorinsky_cs > 0): computed from the resolved flow, not learned; Delta is
+        # the scan's resolution (geometric mean of the voxel edges) unless problem.smagorinsky_delta_mm is given
+        self.smag_cs = float(p.get("smagorinsky_cs", 0.0))
+        if self.smag_cs > 0 and self.eddy:
+            raise ValueError("problem.smagorinsky_cs and problem.eddy_viscosity are alternatives; set one")
+        dmm = p.get("smagorinsky_delta_mm", None)
+        self.smag_delta = (float(dmm) * mm) if dmm else float(np.prod(self.voxel) ** (1.0 / 3.0))
         self.cath_phase = np.asarray(d["cath_phase_s"])
         self.cath_dp = np.asarray(d["cath_dp_mmHg"])
         self.cath_peak = float(d["cath_dp_peak_mmHg"])
@@ -165,15 +176,28 @@ class CoarctationMRIInversePINN(Problem):
         """(t, a, b, c) -> (u, v, w, p), non-dimensional."""
         return self.net(params)
 
+    def smagorinsky_fn(self, params):
+        """z -> nu_t = (C_s Delta)^2 |S|, |S| = sqrt(2 S_ij S_ij), S the resolved strain rate (non-dimensional)."""
+        f = self.net(params)
+        coef = (self.smag_cs * self.smag_delta) ** 2
+
+        def nut(z):
+            G = jnp.stack([physics.directional(f, z, s)[:3] for s in (1, 2, 3)], axis=1)  # G[i, j] = d u_i / d x_j
+            S = 0.5 * (G + G.T)
+            return coef * jnp.sqrt(2.0 * jnp.sum(S * S) + 1e-10)
+
+        return nut
+
     def residual_fn(self, params):
-        if not self.eddy:
+        if not (self.eddy or self.smag_cs > 0):
             return physics.ns_vp_residual(self.net(params), Re=self.Re, dim=3, unsteady=True)
         f = self.net(params)
         nu = 1.0 / self.Re
+        smag = self.smagorinsky_fn(params) if self.smag_cs > 0 else None
 
         def r(z):
             out = f(z)
-            u, nut = out[:3], out[4]
+            u = out[:3]
             u_t = physics.directional(f, z, 0)[:3]
             conv, lap, gp, div, cols = jnp.zeros(3), jnp.zeros(3), [], 0.0, []
             for j, s in enumerate((1, 2, 3)):
@@ -184,7 +208,12 @@ class CoarctationMRIInversePINN(Problem):
                 div = div + f_s[j]
                 cols.append(f_s)
             G = jnp.stack([c[:3] for c in cols], axis=1)   # G[i, j] = d u_i / d x_j
-            gnu = jnp.stack([c[4] for c in cols])          # d nu_t / d x_j
+            if smag is not None:  # nu_t from the resolved strain rate; its gradient by forward mode through |S|
+                nut = smag(z)
+                gnu = jnp.stack([physics.directional(smag, z, s) for s in (1, 2, 3)])
+            else:  # the learned field, the velocity network's last output
+                nut = out[4]
+                gnu = jnp.stack([c[4] for c in cols])      # d nu_t / d x_j
             stress = (G + G.T) @ gnu                        # sum_j (du_i/dx_j + du_j/dx_i) dnu_t/dx_j
             r_mom = u_t + conv + jnp.stack(gp) - (nu + nut) * lap - stress
             return r_mom, div
@@ -312,8 +341,12 @@ class CoarctationMRIInversePINN(Problem):
         fit = float(np.linalg.norm(pred - ref) / np.linalg.norm(ref))
         peak = float(dp.max())
         extra = {}
-        if self.eddy:
-            nut = self.predict(params, np.asarray(self.uniform_collocation(jax.random.PRNGKey(0), 8192)))[:, 4]
+        if self.eddy or self.smag_cs > 0:
+            pts = self.uniform_collocation(jax.random.PRNGKey(0), 8192)
+            if self.eddy:
+                nut = self.predict(params, np.asarray(pts))[:, 4]
+            else:
+                nut = np.asarray(jax.jit(jax.vmap(self.smagorinsky_fn(params)))(pts))
             extra = {"nu_t_mean_over_nu": float(nut.mean() * self.Re), "nu_t_p99_over_nu": float(np.percentile(nut, 99) * self.Re)}
         extra["data_prep_version"] = int(self.d.get("prep_version", 0))
         extra["pressure_net"] = int(self.pressure_net)
