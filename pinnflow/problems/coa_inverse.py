@@ -128,7 +128,10 @@ class CoarctationMRIInversePINN(Problem):
         # this scan's voxels and frames by claude helper/diagnostics/flowp_register.py (<case>_flowp.npz: acc (F, N, 3) m/s^2 in the local
         # frame, inside (N,) where 4D-FlowP covers the lumen)
         self.accel = bool(p.get("accel_data", False))
-        if self.accel:
+        # problem.accel_pressure: the pressure gradient balances the measured acceleration directly, grad p = -Du/Dt
+        # (the 4D-FlowP pressure estimate's principle; viscous terms are a few per cent of it and left out)
+        self.accel_p = bool(p.get("accel_pressure", False))
+        if self.accel or self.accel_p:
             fa = Path(p.get("accel_file", None) or f.with_name(f"{self.case}_flowp.npz"))
             if not fa.exists():
                 raise FileNotFoundError(f"{fa} missing; register 4D-FlowP with: python \"claude helper/diagnostics/flowp_register.py\" --case {self.case}")
@@ -140,7 +143,7 @@ class CoarctationMRIInversePINN(Problem):
             fi, ni = np.nonzero(np.broadcast_to(inside[None], (F, N)))
             self.acc_idx = jnp.asarray((fi * N + ni).astype(np.int32))  # voxel-frames of train_c with a measurement
             self.train_acc = jnp.asarray(acc.reshape(F * N, 3))
-            for k in ("acc_u", "acc_v", "acc_w"):
+            for k in (("acc_u", "acc_v", "acc_w") if self.accel else ()) + (("pacc_u", "pacc_v", "pacc_w") if self.accel_p else ()):
                 self.init_weights.setdefault(k, 1.0)
         self.cath_phase = np.asarray(d["cath_phase_s"])
         self.cath_dp = np.asarray(d["cath_dp_mmHg"])
@@ -316,7 +319,7 @@ class CoarctationMRIInversePINN(Problem):
             "anchor": jnp.concatenate([ta, jnp.broadcast_to(da, (nw, 3))], 1),
             **self._common_batch_fields(),
         }
-        if self.accel:  # measured accelerations, averaged over the same voxel cube and acquisition window as the velocity
+        if self.accel or self.accel_p:  # measured accelerations, averaged over the voxel cube and window like the velocity
             ka = jax.random.split(ks[7], 3)
             Ba = int(cfg.get("acc_batch_size", B))
             ia = self.acc_idx[jax.random.randint(ka[0], (Ba,), 0, self.acc_idx.shape[0])]
@@ -339,6 +342,19 @@ class CoarctationMRIInversePINN(Problem):
 
         return acc
 
+    def pressure_gradient_fn(self, params):
+        """z -> grad p (non-dimensional), through the pressure network alone when there is one."""
+        if self.pressure_net:
+            def p(z):
+                return self.p_mlp.apply(params["p"], self._p_features(z))
+        else:
+            g = self.net(params)
+
+            def p(z):
+                return g(z)[3]
+
+        return lambda z: jnp.stack([physics.directional(p, z, s) for s in (1, 2, 3)])
+
     # ------------------------------------------------------------------ losses
     def losses(self, params, batch) -> Dict[str, jnp.ndarray]:
         f = jax.vmap(self.net(params))
@@ -355,6 +371,10 @@ class CoarctationMRIInversePINN(Problem):
             Ba = batch["acc_target"].shape[0]
             pa = self.vmap_pointwise(self.material_acceleration_fn(params))(batch["acc"]).reshape(Ba, self.n_sub, 3).mean(1)
             out.update({k: mse(pa[:, i], batch["acc_target"][:, i]) for i, k in enumerate(("acc_u", "acc_v", "acc_w"))})
+        if self.accel_p:  # the voxel- and window-averaged pressure gradient against minus the measured acceleration
+            Ba = batch["acc_target"].shape[0]
+            gp = jax.vmap(self.pressure_gradient_fn(params))(batch["acc"]).reshape(Ba, self.n_sub, 3).mean(1)
+            out.update({k: mse(gp[:, i], -batch["acc_target"][:, i]) for i, k in enumerate(("pacc_u", "pacc_v", "pacc_w"))})
         return out
 
     # ------------------------------------------------------------------ evaluation
@@ -405,6 +425,13 @@ class CoarctationMRIInversePINN(Problem):
             pa = np.asarray(self._acc_jit(params, self.train_c[ia]))
             ra = np.asarray(self.train_acc)[ia]
             extra["accel_fit_rel"] = float(np.linalg.norm(pa - ra) / np.linalg.norm(ra))
+        if self.accel_p:  # grad p against minus the measured acceleration at the voxel centres
+            ia = np.asarray(self.acc_idx)[np.linspace(0, len(self.acc_idx) - 1, min(8192, len(self.acc_idx))).astype(int)]
+            if not hasattr(self, "_gp_jit"):
+                self._gp_jit = jax.jit(lambda prm, z: jax.vmap(self.pressure_gradient_fn(prm))(z))
+            gp = np.asarray(self._gp_jit(params, self.train_c[ia]))
+            ra = np.asarray(self.train_acc)[ia]
+            extra["pacc_fit_rel"] = float(np.linalg.norm(gp + ra) / np.linalg.norm(ra))
         extra["data_prep_version"] = int(self.d.get("prep_version", 0))
         extra["pressure_net"] = int(self.pressure_net)
         extra["cath_shift_ms"] = 1e3 * self.cath_shift

@@ -573,6 +573,22 @@ is not meaningful then (the JAX peak is).
       has to reproduce 80 m/s^2 systolic spikes while matching the velocity and the physics, and 20k steps leave it
       short. The raw path estimate from the same data reached 9.9 mmHg. Longer training is the first step; a heavier
       acceleration weight would be a calibration (one case, then scored on the others).
+    - Over the beat (`p2_dp_over_beat`, the three 20k networks against the catheter): every network follows the
+      catheter's timing (rise, systolic peak, negative dip near 0.5 s, second bump near 0.64 s) at about half its
+      systolic height. In diastole (0.6-1.05 s) the catheter stays 1-2.5 mmHg positive with a 4.7 mmHg bump at
+      0.64 s while the networks are near 0; a rigid-wall incompressible model has no term for it (a reflected wave
+      in the compliant phantom, or an offset between the two catheter readings). Not modelled: the 4D-FlowP pressure
+      estimate, which reached slope 0.95, also treats the lumen as fixed.
+  - **The measured acceleration in the pressure directly (`problem.accel_pressure`, off by default).** Terms pacc_u,
+    pacc_v, pacc_w match the pressure network's gradient, averaged over each voxel and window, to minus the measured
+    acceleration: grad p = -Du/Dt, the principle of the 4D-FlowP estimate, with the small viscous terms left out. The
+    momentum residual still applies, so the pressure must agree with both. grad p by forward mode through the
+    pressure network alone; against central differences in float64 to 1e-8 (float32 rounding gave 1.7e-2 on small
+    gradients). At the 20k acc_frac checkpoint grad p is 0.707 (relative) from the measured acceleration.
+    - **Running (desktop, 2026-10-23 18:08 UTC):** `runs/coa_P2_baseline_accp_60k`: the 20k acc_frac model
+      (`_test_accel_frac_smag`) continued 40k steps (60k in total) with `accel_pressure`, the learning rate resumed at
+      4.538e-4 without warm-up (the 60k schedule's value at 20k). Adam's moments, the adaptive weights and the RAD
+      pool restart. Published to the model repository when it finishes.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`claude helper/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
