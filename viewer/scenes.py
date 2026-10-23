@@ -1,6 +1,6 @@
 """The seven scenes: what each one shows, how its pigment is laid down, and which evidence sits on the rack.
 
-Verdict numbers are the measured values from STATUS.md (product truth); the viewer never recomputes them.
+Verdict numbers are the measured values from docs/STATUS.md (product truth); the viewer never recomputes them.
 Live, per-frame numbers are computed separately and shown as such.
 """
 from __future__ import annotations

@@ -335,13 +335,13 @@ class VerdictStamp(QWidget):
         self.word = ""
         self.number = ""
         self.label = ""
-        self.source = "measured, STATUS.md"
+        self.source = "measured, docs/STATUS.md"
         self.pigment = theme.INK
         self._imp: Optional[QImage] = None
         self.press = Tween(self, 220)
         self.press.to(1.0, animate=False)
 
-    def set(self, word: str, number: str, label: str, pigment: str, source: str = "measured, STATUS.md"):
+    def set(self, word: str, number: str, label: str, pigment: str, source: str = "measured, docs/STATUS.md"):
         changed = (word, number, label, source) != (self.word, self.number, self.label, getattr(self, "source", None))
         self.word, self.number, self.label, self.pigment, self.source = word, number, label, pigment, source
         self._imp = None

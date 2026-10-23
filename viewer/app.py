@@ -203,7 +203,7 @@ class MainWindow(QMainWindow):
 
     def on_offline(self):
         self.bath.state = "offline"
-        cmd = f"wsl -d Ubuntu -- bash {wsl_path(ROOT / 'scripts' / 'serve_local_wsl.sh')}"
+        cmd = f"wsl -d Ubuntu -- bash {wsl_path(ROOT / 'scripts' / 'machines' / 'serve_local_wsl.sh')}"
         self.bath.state_text = "No network server is answering.\nPress S to start it in WSL, or run:\n" + cmd
         self.title.setText("Waiting for the server")
         self.bath.update()
@@ -284,7 +284,7 @@ class MainWindow(QMainWindow):
         self.rail.set_active(sid)
         self.title.setText(spec.name)
         self.summary.setText(m.get("summary", ""))
-        source = "measured, STATUS.md" if spec.tab == "bench" else ("measured, final_eval.json" if trained else "awaiting training")
+        source = "measured, docs/STATUS.md" if spec.tab == "bench" else ("measured, final_eval.json" if trained else "awaiting training")
         if self.partner is not None:
             self.stamp.set(*_pair_stamp(spec, self.partner), spec.pigment, source)
         else:
@@ -834,7 +834,7 @@ def _apply_server_verdict(spec, m) -> None:
         spec.verdict, spec.headline, spec.headline_label = "trained", "-", "not evaluated yet: final_eval.json is missing"
     else:
         spec.verdict, spec.headline = "not trained", "-"
-        spec.headline_label = "trains on the desktop and arrives here by itself (docs/DESKTOP_TRAINING.md)"
+        spec.headline_label = "trains on the desktop and arrives here by itself (claude helper/DESKTOP_TRAINING.md)"
 
 
 def _pair_stamp(a, b):

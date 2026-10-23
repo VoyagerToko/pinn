@@ -394,7 +394,7 @@ def save_dataset(out_dir: Path, v: StenosisVessel, truth: Dict, mri: Dict, meta:
 def load_dataset(data_dir: Path) -> Tuple[StenosisVessel, Dict[str, np.ndarray], Dict[str, np.ndarray]]:
     data_dir = Path(data_dir)
     if not (data_dir / "mri.npz").exists():
-        raise FileNotFoundError(f"no stenosis dataset in {data_dir}; create it with: python scripts/make_stenosis_data.py")
+        raise FileNotFoundError(f"no stenosis dataset in {data_dir}; create it with: python scripts/data/make_stenosis_data.py")
     info = json.loads((data_dir / "vessel.json").read_text())
     v = StenosisVessel.from_json(info["vessel"])
     truth = dict(np.load(data_dir / "truth.npz"))

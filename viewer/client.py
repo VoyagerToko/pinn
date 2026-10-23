@@ -47,10 +47,10 @@ def candidate_urls() -> List[str]:
 
 
 def start_wsl_server() -> bool:
-    """Launch scripts/serve_local_wsl.sh in WSL without blocking. Returns False when WSL cannot be started."""
+    """Launch scripts/machines/serve_local_wsl.sh in WSL without blocking. Returns False when WSL cannot be started."""
     try:
         subprocess.Popen(
-            ["wsl", "-d", DISTRO, "--", "bash", wsl_path(ROOT / "scripts" / "serve_local_wsl.sh")],
+            ["wsl", "-d", DISTRO, "--", "bash", wsl_path(ROOT / "scripts" / "machines" / "serve_local_wsl.sh")],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=_NO_WINDOW,
         )
         return True

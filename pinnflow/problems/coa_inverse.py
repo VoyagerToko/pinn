@@ -27,7 +27,7 @@ output: exactly periodic over the beat through explicit time harmonics, with iso
 space (``PressureMLP``, ``_p_features``). Trained jointly with the velocity, it is what the momentum terms act on. The
 shared output did not learn the pressure: the first phantom networks left the flow's systolic acceleration in the
 momentum residual (0.3 mmHg), while a pressure fitted alone to the same frozen velocity gives 7.3 mmHg and a third less
-residual (scripts/coa_pressure_fit.py, STATUS.md 2026-10-23). Run configs without the key keep the shared output, so
+residual (claude helper/diagnostics/coa_pressure_fit.py, docs/STATUS.md 2026-10-23). Run configs without the key keep the shared output, so
 older checkpoints load as they were trained.
 
 The pressure is never measured by the scan. ``evaluate`` returns the section-averaged pressure difference between the
@@ -75,7 +75,7 @@ class CoarctationMRIInversePINN(Problem):
         p = config.problem
         f = Path(p.get("data_file", None) or DATA_DIR / "stanford_coa" / "prepared" / f"{p.get('case', 'P2_baseline')}.npz")
         if not f.exists():
-            raise FileNotFoundError(f"{f} missing; prepare it with: python scripts/prepare_coa.py --case {p.get('case', 'P2_baseline')}")
+            raise FileNotFoundError(f"{f} missing; prepare it with: python scripts/data/prepare_coa.py --case {p.get('case', 'P2_baseline')}")
         d = dict(np.load(f))
         self.d = d
         self.case = str(d["case"])

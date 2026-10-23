@@ -250,7 +250,7 @@ class TaylorGreen3D:
         p = (1/16)(cos 2x + cos 2y)(cos 2z + 2)
     Reference: the dissipation peak near t ~ 9 is the acceptance criterion (within 5%). The HiOCFD
     case pages publish no numeric curves; the reference curve used here is the "ref. soln." line of
-    DeBonis (2013), NASA/TM-2013-217850, Fig. 4(a), digitised by ``scripts/digitize_tgv_reference.py``
+    DeBonis (2013), NASA/TM-2013-217850, Fig. 4(a), digitised by ``scripts/data/digitize_tgv_reference.py``
     into ``data/tgv3d_re1600/debonis2013_fig4a_ref_dissipation.csv``: peak 0.01282 at t = 9.00
     (digitisation uncertainty about +-1.6e-4 in epsilon, i.e. ~1 % of the peak).
     """

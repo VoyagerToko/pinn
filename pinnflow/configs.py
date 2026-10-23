@@ -175,7 +175,7 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         w.init_weights = ml_collections.ConfigDict({"u_data": 1.0, "v_data": 1.0, "r_u": 1.0, "r_v": 1.0})
     elif benchmark == "stenosis_mri":
         # real-world use case: pressure across a stenosis from MRI-like velocity data (pinnflow/vessel.py)
-        p.data_dir = None  # default data/stenosis (scripts/make_stenosis_data.py)
+        p.data_dir = None  # default data/stenosis (scripts/data/make_stenosis_data.py)
         p.sub_samples = 4  # network points averaged per MRI voxel and phase window
         p.hard_walls = True  # exact no-slip on the segmented wall, learned flow rate Q(t)
         p.p_scale = 10.0  # pressure output scale: about 1/2 of the throat speed squared
@@ -193,18 +193,18 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
     elif benchmark == "coa_mri":
         # real data: aortic coarctation phantom, 4D flow MRI + catheter (pinnflow/coa_phantom.py)
         p.case = "P2_baseline"
-        p.data_file = None  # default data/stanford_coa/prepared/<case>.npz (scripts/prepare_coa.py)
+        p.data_file = None  # default data/stanford_coa/prepared/<case>.npz (scripts/data/prepare_coa.py)
         p.sub_samples = 4
         p.p_scale = 3.0  # pressure in rho (1 m/s)^2 = 8.25 mmHg; the catheter drops are 7-25 mmHg
         p.eddy_viscosity = False  # True: learn nu_t(t, x) (5th output) for unresolved turbulent mixing in the jet
         p.nu_t_scale = 0.01
         p.nu_t_reg_weight = 0.01  # fixed weight of the mean-nu_t penalty; lower it if nu_t collapses to 0
         # Smagorinsky eddy viscosity nu_t = (C_s Delta)^2 |S| from the resolved strain rate, instead of a learned field (the
-        # learned one collapses to 0, STATUS.md 2026-10-23). 0 = off; 0.17 is Lilly's value. Delta defaults to the voxel size.
+        # learned one collapses to 0, docs/STATUS.md 2026-10-23). 0 = off; 0.17 is Lilly's value. Delta defaults to the voxel size.
         p.smagorinsky_cs = 0.0
         p.smagorinsky_delta_mm = None
         # the pressure from its own network (periodic time harmonics, isotropic multi-scale space features), trained jointly;
-        # the shared fourth output left the systolic acceleration in the momentum residual (STATUS.md, 2026-10-23)
+        # the shared fourth output left the systolic acceleration in the momentum residual (docs/STATUS.md, 2026-10-23)
         p.pressure_net = True
         p.pressure_net_harmonics = 12
         p.pressure_net_width = 128

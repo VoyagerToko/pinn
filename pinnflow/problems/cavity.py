@@ -135,7 +135,7 @@ class CavityPINN(Problem):
         return self._ref_cache[Re]
 
     def _fd_reference(self, Re: int):
-        """Finite-difference solution of the *regularised*-lid cavity (scripts/cavity_fd_reference.py), finest grid available."""
+        """Finite-difference solution of the *regularised*-lid cavity (scripts/data/cavity_fd_reference.py), finest grid available."""
         key = ("fd", Re)
         if key not in self._ref_cache:
             from ..data import DATA_DIR

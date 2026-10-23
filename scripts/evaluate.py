@@ -159,7 +159,7 @@ def eval_tgv3d(cfg, workdir: Path, n_hist: int = 32, spectrum_n: int = 64, n_tim
     k, E = M.energy_spectrum(u)
     np.savetxt(workdir / f"spectrum_t{t_peak:.1f}.csv", np.stack([k, E], 1), delimiter=",", header="k,E", comments="")
     out["spectrum_slope_k4_16"] = M.inertial_range_slope(k, E)
-    # reference dissipation curve digitised from DeBonis (2013) Fig. 4(a) (scripts/digitize_tgv_reference.py)
+    # reference dissipation curve digitised from DeBonis (2013) Fig. 4(a) (scripts/data/digitize_tgv_reference.py)
     ref_path = ROOT / "data" / "tgv3d_re1600" / "debonis2013_fig4a_ref_dissipation.csv"
     ref = None
     if ref_path.exists():
@@ -224,7 +224,7 @@ def step_time(workdir: Path) -> Dict[str, float]:
 
 
 def cost_summary(workdir: Path, throughput_fn=None, n_points: int = 1 << 18, dim_box=None) -> Dict[str, float]:
-    """Handbook 7.6: training wall-clock (cost.json written by scripts/run_job.sh), step time, peak memory
+    """Handbook 7.6: training wall-clock (cost.json written by scripts/machines/run_job.sh), step time, peak memory
     (JAX allocator and nvidia-smi samples), inference throughput in query points per second."""
     out = step_time(workdir)
     cj = workdir / "cost.json"

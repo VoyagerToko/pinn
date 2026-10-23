@@ -8,7 +8,7 @@ real MRI of 3D-printed compliant aortas with a coarctation, in a pulsatile flow 
     data/stanford_coa/Imaging/<case>/4DFlow_highRes/        Siemens product 4D flow DICOM, 1.8 mm isotropic
 
 Cases: P1_baseline, P1_severe, P2_baseline, P2_severe, each also at a lower flow rate (*_lowflow).
-Fetch: python scripts/remote_zip.py https://stacks.stanford.edu/file/druid:ms528wr9373/Imaging.zip --get ...
+Fetch: python scripts/data/remote_zip.py https://stacks.stanford.edu/file/druid:ms528wr9373/Imaging.zip --get ...
 """
 from __future__ import annotations
 

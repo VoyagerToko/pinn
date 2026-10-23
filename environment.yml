@@ -1,4 +1,4 @@
-# Native Windows development environment (CPU JAX). For GPU training use scripts/setup_wsl_gpu.sh (WSL2).
+# Native Windows development environment (CPU JAX). For GPU training use scripts/machines/setup_wsl_gpu.sh (WSL2).
 #   conda env create -f environment.yml && conda activate pinn && pip install -e .
 name: pinn
 channels:

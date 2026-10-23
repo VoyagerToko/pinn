@@ -9,13 +9,26 @@ residuals against analytic solutions before a single network is trained.
 ```
 pinn/
 ├── pinnflow/                 the package (one module per handbook step, see below)
-│   └── problems/             one PINN problem class per benchmark (A-D, inverse, PI-DeepONet)
-├── scripts/                  train.py · evaluate.py · plot2d.py · visualize.py · check_env.py · setup_*_gpu.sh
+│   └── problems/             one PINN problem class per benchmark (A-D, inverse, PI-DeepONet, stenosis, phantom)
+├── viewer/                   the live viewer (python -m viewer), fed by scripts/serve.py
+├── scripts/
+│   ├── train.py              train any benchmark       (python scripts/train.py --benchmark <name>)
+│   ├── evaluate.py           evaluate a trained run
+│   ├── serve.py              serve trained networks to the viewer
+│   ├── data/                 make or fetch datasets: download_data.sh, make_stenosis_data.py, prepare_coa.py, ...
+│   ├── results/              reports, figures, paper tables: coa_report.py, plot2d.py, visualize.py, paper_*.py
+│   └── machines/             setup and running on each machine: setup_*_gpu.sh, check_env.py, *_local_wsl.sh,
+│                             desktop_train_all.sh, publish_models.sh / fetch_models.py (desktop -> laptop)
 ├── tests/                    pytest suite (physics gates, archs, losses, metrics, data, smoke training)
-├── data/                     downloaded reference data (see "Data inventory")
-├── external/                 JAX-PI (main + pirate), SPINN, CausalPINNs  (git clones, --depth 1)
-├── environment.yml           native Windows env (CPU JAX) · pyproject.toml (pip install -e .)
-└── runs/                     created by scripts/train.py
+├── docs/                     the handbook, and STATUS.md (results and open issues)
+├── paper/                    the write-up (LaTeX)
+├── data/                     reference data (see "Data inventory"); large sets are downloaded, not committed
+├── external/                 JAX-PI (main + pirate), SPINN, CausalPINNs  (git clones, --depth 1; not committed)
+├── runs/                     training outputs (not committed)
+├── claude helper/            material for the AI assistants, not part of the project: their runbook,
+│                             the viewer's design notes, one-off diagnostics and machine tools
+├── environment.yml           native Windows env (CPU JAX) · pyproject.toml (pip install -e .) · requirements.txt
+└── CLAUDE.md                 the assistants' brief (Claude Code reads it from the repository root)
 ```
 
 ## 1. Environments (STEP 0)
@@ -33,19 +46,19 @@ a CPU-only torch (JAX-PI's samplers import it) and this package (`pip install -e
 ```powershell
 # native (Windows)
 conda activate pinn
-python scripts/check_env.py                    # report + 20-step smoke run
+python scripts/machines/check_env.py                    # report + 20-step smoke run
 
 # GPU (WSL2 Ubuntu) - the code lives on the Windows drive, no copy needed
 wsl -d Ubuntu
 source ~/miniconda3/bin/activate pinn
 cd /mnt/c/Users/mehul/pinn
 export XLA_PYTHON_CLIENT_PREALLOCATE=false      # share the 6 GB with the display driver
-python scripts/check_env.py                    # must print devices: [CudaDevice(id=0)]
+python scripts/machines/check_env.py                    # must print devices: [CudaDevice(id=0)]
 ```
 
-Re-create the WSL environment any time with `wsl -d Ubuntu -- bash /mnt/c/Users/mehul/pinn/scripts/setup_wsl_gpu.sh`.
+Re-create the WSL environment any time with `wsl -d Ubuntu -- bash /mnt/c/Users/mehul/pinn/scripts/machines/setup_wsl_gpu.sh`.
 
-**Any other Linux / WSL2 machine**: `bash scripts/setup_linux_gpu.sh` (installs Miniforge if needed, no hard-coded paths).
+**Any other Linux / WSL2 machine**: `bash scripts/machines/setup_linux_gpu.sh` (installs Miniforge if needed, no hard-coded paths).
 Do **not** `pip install "jax[cuda12]"` in a native Windows Python: there are no CUDA wheels for Windows, so pip
 silently backtracks to a 2023 CPU-only JAX that this code cannot run on.
 
@@ -58,7 +71,7 @@ This package re-implements PirateNet itself (`pinnflow.archs.PirateNet`), so the
 ## 2. Week-1 gate: run the JAX-PI cavity example unmodified
 
 ```bash
-wsl -d Ubuntu -- bash /mnt/c/Users/mehul/pinn/scripts/run_jaxpi_ldc_example.sh
+wsl -d Ubuntu -- bash "/mnt/c/Users/mehul/pinn/claude helper/tools/run_jaxpi_ldc_example.sh"
 ```
 (W&B runs offline; logs in `external/jaxpi/examples/ldc/wandb`). Compare the final `l2_error` with the
 numbers in `external/jaxpi/examples/ldc/README.md`.
@@ -78,7 +91,7 @@ numbers in `external/jaxpi/examples/ldc/README.md`.
 | Ghia, Ghia & Shin 1982 centreline tables | `pinnflow.benchmarks.ghia_tables` | transcribed; cross-checked against the JAX-PI fields in `tests/test_benchmarks.py` |
 | PDEBench, The Well, JHTDB | - | not downloaded (TB-scale / token-gated; only for the optional operator-learning stage) |
 
-Recreate all downloads with `bash scripts/download_data.sh` (WSL/Linux). Loaders: `pinnflow.data` (`load_cylinder_wake`, `load_featflow_series`, `load_jaxpi_cavity`, `load_causal_ns`).
+Recreate all downloads with `bash scripts/data/download_data.sh` (WSL/Linux). Loaders: `pinnflow.data` (`load_cylinder_wake`, `load_featflow_series`, `load_jaxpi_cavity`, `load_causal_ns`).
 
 ## 4. Code map against the handbook
 
@@ -93,7 +106,7 @@ Recreate all downloads with `bash scripts/download_data.sh` (WSL/Linux). Loaders
 | 6 training | `pinnflow/training.py` | Adam with 5k warm-up + x0.9/2k decay, `matmul_precision=highest`, grad-norm/NTK updates, causal annealing, RAD hook, CSV/W&B logging, msgpack checkpoints, L-BFGS stage (optax zoom line search = strong Wolfe), Re curriculum, time marching with warm start |
 | 7 validation | `pinnflow/metrics.py` | relative L2, max divergence, C_D/C_L/dP (Schaefer-Turek surface form, AD gradients), Strouhal via FFT, E_k, enstrophy, eps = -dE/dt and 2 nu zeta, shell-summed spectrum + inertial slope, throughput |
 | 8 ablation | `pinnflow/configs.py` | rows A-H toggling Fourier / Modified MLP+RWF / hard constraints / causal / adaptive lambda / RAD / SPINN |
-| 9 visualisation | `pinnflow/viz.py`, `scripts/visualize.py` | grid sampling to `.vti`, Q isosurfaces to `.vtp`, RK45 particle advection on the continuous field, PyVista off-screen render, ffmpeg encode |
+| 9 visualisation | `pinnflow/viz.py`, `scripts/results/visualize.py` | grid sampling to `.vti`, Q isosurfaces to `.vtp`, RK45 particle advection on the continuous field, PyVista off-screen render, ffmpeg encode |
 | 5-6 problems | `pinnflow/problems/` | `TaylorGreen2DPINN`, `CavityPINN`, `DFGCylinderPINN`, `TaylorGreen3DSPINN`, `CylinderWakeInversePINN`, `ParametricCavityDeepONet` |
 
 ## 5. Tests (run before training - STEP 2.1 gate)
@@ -134,14 +147,14 @@ Every run writes `runs/<benchmark>_<row>/{config.json, metrics.csv, latest.msgpa
 Figures and movies for the 2D cases (fields vs exact, error maps, streamlines, Ghia profiles, vortex street):
 
 ```bash
-python scripts/plot2d.py --benchmark tgv2d    --workdir runs/tgv2d_G --animate 120
-python scripts/plot2d.py --benchmark cavity   --workdir runs/cavity_F
-python scripts/plot2d.py --benchmark cylinder --workdir runs/cylinder_G --animate 200
+python scripts/results/plot2d.py --benchmark tgv2d    --workdir runs/tgv2d_G --animate 120
+python scripts/results/plot2d.py --benchmark cavity   --workdir runs/cavity_F
+python scripts/results/plot2d.py --benchmark cylinder --workdir runs/cylinder_G --animate 200
 ```
 
 Then: `python scripts/evaluate.py --benchmark cylinder --workdir runs/cylinder_G` (Cd/Cl series, St,
 cycle statistics, overlay against FEATFLOW), `--benchmark tgv3d` (E_k, dissipation peak, enstrophy identity,
-spectrum slope), and `python scripts/visualize.py --workdir runs/tgv3d_H` for the animation.
+spectrum slope), and `python scripts/results/visualize.py --workdir runs/tgv3d_H` for the animation.
 
 ### Memory and speed notes
 
@@ -190,8 +203,8 @@ TCP 8000 in the Windows firewall.
 **Running the scenes on another machine's GPU.** The checkpoints are small (37.7 MB for all seven scenes with
 their references). On the training machine the server offers them at `/bundle`; on the other machine
 `curl -o pinn_bundle.tar.gz http://<host>:8000/bundle && tar -xzf pinn_bundle.tar.gz` at the repository root,
-then `wsl -d Ubuntu -- bash /mnt/c/.../pinn/scripts/serve_local_wsl.sh`, which prints the address to use.
-Measured on an RTX 3060 Laptop (`scripts/bench_server.py`): 5,000 particle velocities in 11-14 ms (70-90 updates/s)
+then `wsl -d Ubuntu -- bash /mnt/c/.../pinn/scripts/machines/serve_local_wsl.sh`, which prints the address to use.
+Measured on an RTX 3060 Laptop (`claude helper/tools/bench_server.py`): 5,000 particle velocities in 11-14 ms (70-90 updates/s)
 via the WSL address, 64-75 ms via `localhost` (Windows' forwarding into WSL); full fields 18-215 ms per 128^2 frame
 depending on the scene, 82 ms per 48^3 3D frame; first request per grid size compiles for 20-30 s.
 
@@ -201,7 +214,7 @@ Every frame is a network prediction. Pigment dropped with a click, or combed wit
 velocity the network predicts at each particle. The reference sits beside it at the same instant and colour
 scale, and each failure shows its evidence: the corner divergence, the lost flow rate, the missing dissipation
 peak. Options include `--scene`, `--view`, `--Re`, `--play`, `--size WxH` and `--shot file.png`.
-The visual system is in `DESIGN.md`: the "marbling bath", with one pigment per scene, procedural paper and ink,
+The visual system is in `claude helper/design/DESIGN.md`: the "marbling bath", with one pigment per scene, procedural paper and ink,
 and a 13 px text floor.
 
 | Module | Role |
@@ -224,10 +237,10 @@ measures? Today that drop is measured with a catheter, or estimated from Doppler
 Bernoulli rule, dp [mmHg] = 4 v_peak^2.
 
 ```bash
-python scripts/make_stenosis_data.py                 # CFD truth + simulated scan -> data/stenosis/  (~10 min, CPU)
+python scripts/data/make_stenosis_data.py                 # CFD truth + simulated scan -> data/stenosis/  (~10 min, CPU)
 python scripts/train.py --benchmark stenosis_mri     # the inverse network -> runs/stenosis_mri_G/
 # or, on this laptop's WSL GPU, in the background, restarting the live server when it is done:
-wsl -d Ubuntu -- bash /mnt/c/.../pinn/scripts/train_local_wsl.sh stenosis_mri
+wsl -d Ubuntu -- bash /mnt/c/.../pinn/scripts/machines/train_local_wsl.sh stenosis_mri
 pytest tests/test_vessel.py                          # Poiseuille check of the solver, scan statistics, smoke train
 ```
 
@@ -268,7 +281,7 @@ pytest tests/test_vessel.py                          # Poiseuille check of the s
 
 ## 7. Deviations from the handbook and things to know
 
-See also `CLAUDE.md` (project brief for assistants and contributors), `STATUS.md` (benchmark results and open
+See also `CLAUDE.md` (project brief for assistants and contributors), `docs/STATUS.md` (benchmark results and open
 issues) and `docs/PINN_Implementation_Handbook.md` (the handbook this code implements).
 
 * **Windows**: GPU JAX only inside WSL2. Native env is CPU (fine for tests/eval/viz).
@@ -287,20 +300,20 @@ issues) and `docs/PINN_Implementation_Handbook.md` (the handbook this code imple
 * **Ghia tables** were transcribed, not downloaded; the test against the JAX-PI reference fields is the check.
 * **Benchmark D** runs as row H only (handbook: "and H on D"); rows A-G raise a clear error for `tgv3d`.
 * **Benchmark D reference**: the HiOCFD pages publish no numeric curves; the reference dissipation curve is
-  digitised from DeBonis (2013) Fig. 4(a) (`scripts/digitize_tgv_reference.py`, peak 0.01282 at t = 9.00).
-* **Cavity lid** (STATUS.md D1-D3): imposing the regularised lid exactly (`u = g + phi N` on the lid) is
+  digitised from DeBonis (2013) Fig. 4(a) (`scripts/data/digitize_tgv_reference.py`, peak 0.01282 at t = 9.00).
+* **Cavity lid** (docs/STATUS.md D1-D3): imposing the regularised lid exactly (`u = g + phi N` on the lid) is
   incompatible with continuity at the two top corners, and rows D/F fail with it; `problem.lid_bc="soft"` keeps
   no-slip and v = 0 exact and makes only the lid velocity a loss term. Rows D-G of the cavity ablation use it.
   The fully hard runs are kept as evidence.
 * **Cavity reference**: besides Ghia et al. and the JAX-PI fields (both unit lid), a finite-difference solution of
-  the regularised-lid problem (`scripts/cavity_fd_reference.py`, 512^2 at Re=1000) is the field reference
+  the regularised-lid problem (`scripts/data/cavity_fd_reference.py`, 512^2 at Re=1000) is the field reference
   (`rel_l2_vel_vs_fd`). A converged solution of this benchmark is 2.29% from Ghia's v table.
 * **L-BFGS** runs on one fixed collocation batch; on the cavity it can lower the loss by orders of magnitude
-  while the field error grows (STATUS.md D3). Report pre- and post-L-BFGS numbers.
+  while the field error grows (docs/STATUS.md D3). Report pre- and post-L-BFGS numbers.
 * **Causal eps** starts at the first entry of the annealing schedule (1e-2); before 2026-09-24 it started at
   `causal_tol` = 1.0.
 * **PI-DeepONet** never samples Re in [300, 530]; Re = 400 is the zero-shot query.
 * **Reduced budgets (2026-09-27)**: to finish within a 12-hour window the cylinder, 3D, inverse, DeepONet and
-  ablation runs use the reduced budgets listed in STATUS.md; the cylinder ablation was not run.
+  ablation runs use the reduced budgets listed in docs/STATUS.md; the cylinder ablation was not run.
 * **STEP 9 export**: `.vti` frames written before 2026-09-24 had x and z swapped (VTK stores x fastest).
 * **Disk**: C: has ~30 GB free; the WSL VHD grows on C:, so keep an eye on it during large runs.

@@ -3,7 +3,7 @@
 Downloaded reference data is not committed (see `.gitignore`). Recreate everything with
 
 ```bash
-bash scripts/download_data.sh        # Linux / WSL
+bash scripts/data/download_data.sh        # Linux / WSL
 ```
 
 | folder | contents | used by |

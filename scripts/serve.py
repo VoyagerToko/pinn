@@ -56,7 +56,7 @@ from pinnflow.problems import PROBLEMS, DFGCylinderPINN  # noqa: E402
 from pinnflow.utils import load_params  # noqa: E402
 
 # --------------------------------------------------------------------------------------
-# registry: which run backs which scene, and the verdict from STATUS.md
+# registry: which run backs which scene, and the verdict from docs/STATUS.md
 # --------------------------------------------------------------------------------------
 REGISTRY: Dict[str, Dict] = {
     "stenosis_fast": {
