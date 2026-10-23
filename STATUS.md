@@ -460,8 +460,26 @@ is not meaningful then (the JAX peak is).
     - The mean settles at 0.86-0.88 mmHg, the laminar limit the stand-alone fit gave (0.85): over a beat the
       time-derivative term integrates to zero and laminar friction is all that is left. The peak's expected laminar
       ceiling is the stand-alone 7.26 (Bernoulli 8.0 on this case); the rest of the catheter's 13.1 needs the
-      turbulent loss, i.e. the eddy-viscosity network, which can now act on the pressure. Its cold test
-      (`runs/_test_pnet_cold_eddy`, 20k steps, `nu_t_reg_weight` 0.01) is running.
+      turbulent loss, i.e. the eddy-viscosity network, which can now act on the pressure.
+  - **The eddy viscosity with the pressure network (desktop, 2026-10-23): nu_t still collapses.** Cold, 20k steps,
+    P2 baseline, prep v5, not published (`runs/_test_pnet_cold_eddy`, `runs/_test_pnet_cold_eddy_reg0001`):
+
+    | step | nu_t_reg 0.01: peak | mean | nu_t/nu mean | p99 | nu_t_reg 0.001: peak | mean | nu_t/nu mean | p99 |
+    |---|---|---|---|---|---|---|---|---|
+    | 5000 | 1.78 | 0.29 | 0.88 | 5.1 | 2.11 | 0.49 | 5.5 | 16.4 |
+    | 10000 | 4.26 | 0.68 | 0.037 | 0.45 | 4.09 | 0.72 | 0.71 | 5.9 |
+    | 15000 | 5.00 | 0.98 | 0.007 | 0.11 | 4.66 | 0.79 | 0.16 | 2.4 |
+    | 20000 | **5.48** | 0.86 | 0.002 | 0.03 | **5.63** | 0.95 | 0.036 | 0.54 |
+
+    - Velocity fit 0.342-0.343 at 20k in both, as laminar (0.342). Laminar at 20k: 5.28 and 0.86.
+    - Both end where the laminar network does: the peak within 0.35 mmHg of it, the mean drop 0.86-0.95 against the
+      catheter's 3.68. The weaker penalty only slows the collapse (nu_t/nu drops 4-7x per 5k steps either way), as it
+      did with the shared output, and the remaining nu_t adds no measurable loss.
+    - So the pressure network removes the old blocker (the drop now climbs; 5.3-5.6 mmHg at 20k, still rising) but
+      not the eddy viscosity's: joint training gains nothing from a free nu_t field and removes it. Reaching the
+      turbulent part of the catheter's drop needs a different turbulence term, for example nu_t tied to the resolved
+      flow (a mixing-length or Smagorinsky form from the velocity gradients) instead of a free output. Not decided; the
+      desktop queue stays stopped.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`docs/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
@@ -472,8 +490,10 @@ is not meaningful then (the JAX peak is).
   heavier physics weights, a 10x weaker nu_t penalty). The momentum residual, not the pressure, carries the flow's
   acceleration in systole ("Real data", 2026-10-23). A pressure fitted alone to the same velocity gives 7.26 mmHg
   (correlation 0.96 with the catheter's waveform), so the cause is the joint training. The separate pressure network
-  passed its desktop test (5.28 mmHg at 20k from scratch, still rising; "Real data"). The eddy-viscosity version is
-  under test; the desktop queue stays stopped until it is decided (prep v5 retrains all 16, about 17 h).
+  passed its desktop test (5.28 mmHg at 20k from scratch, still rising; "Real data"). With it the free eddy viscosity
+  still collapses to ~0 (nu_t_reg 0.01 and 0.001; 5.48 and 5.63 mmHg, mean 0.86-0.95 against 3.68), so the turbulent
+  loss is not captured. Next is a decision on the turbulence term; the desktop queue stays stopped until then (prep v5
+  retrains all 16, about 17 h).
 - Desktop stability: Windows restarted without a clean shutdown (Kernel-Power 41, no bugcheck) on 2026-10-20 (twice),
   10-21 and 10-22 (twice); four of the five during GPU training. Suspect the power supply or the GPU's 16-pin cable under
   load spikes. `nvidia-smi -pl 250` (the card's minimum, admin) would cap them. A restart kills the run in progress;
