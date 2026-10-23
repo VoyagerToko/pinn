@@ -636,6 +636,20 @@ is not meaningful then (the JAX peak is).
     (0.79, 0.94); other sections are noisy or curved. No unit factor of three. Remaining candidates for 5.3 against
     15.9: the 40 ms reconstruction behind the paper against the released 60 ms frames, the slice positions (theirs at
     the gel markers, ours at the 2D-PC planes), and an unregularised Poisson solve of the measured divergence.
+  - **The publication's method on the released file** (`claude helper/diagnostics/flowp_ppe_reproduce.py`, CPU).
+    Least-squares pressure Poisson on the native 4D-FlowP grid and vessel mask (38,860 voxels, first-order
+    differences of neighbour pairs, LSMR), per frame:
+    - measured acceleration, at our planes (mapped through the registration): peak **7.72 mmHg**, mean 0.32;
+    - measured acceleration, head-feet slices swept over the ascending limb 10-60 mm and the descending limb
+      60-180 mm below the arch: peak **6.6-8.7 mmHg**;
+    - acceleration derived from 4D-FlowP's own velocity: 10.81 at our planes, 10.0-11.4 over the sweep.
+    The publication's 15.9 is not reproduced anywhere: the slice position moves the drop by about 2 mmHg. The released
+    60 ms frames are the likeliest difference from its 40 ms reconstruction.
+  - **Our pressure network loses part of the drop.** The same measured acceleration gives 7.72 mmHg from the grid
+    solve and 5.33 from the pressure-network fit on the registered data (flowp_pressure_fit.py). The network (4 x 128
+    tanh, Fourier sigma 1/4/12, 12 time harmonics) is smoother than the throat's pressure change, and the resampling
+    onto the scan's voxels may cost some too. This bounds every network so far (5.3-6.1). Next: a pressure network
+    with more capacity for sharp features, judged by reproducing the grid solve on the same data, then the 60k runs.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`claude helper/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
