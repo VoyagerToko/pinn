@@ -503,15 +503,40 @@ is not meaningful then (the JAX peak is).
     - The resolved jet sets nu_t: its shear is that of a voxel-smoothed jet, so nu_t stays near the fluid's own
       viscosity. C_s = 0.17 assumes resolved small-scale turbulence; at 1.8 mm it is likely too low, but raising it is
       a calibration: do it on one case, freeze it, and score the other seven.
-- **The ceiling is the scan's resolution (2026-10-23).** The scan's jet peaks at 1.42 m/s (the 99.5th percentile
+- **The ceiling of velocity-only data (2026-10-23).** The scan's jet peaks at 1.42 m/s (the 99.5th percentile
   through a 3x3x3 median); the catheter's 13.1 mmHg would need about 1.8 m/s in 4 v^2. Bernoulli 8.0, pressure Poisson
   7.9 and the stand-alone pressure fit 7.3 agree, and the source publication reports conventional 4D flow at slope
   0.63. The networks (5.3-6.1 at 20k, still rising) are below that ceiling, so longer training should close part of
-  the gap; above it needs a sharper jet than the scan holds.
+  the gap. **Correction (same day):** this is a ceiling of velocity-only data, not of the resolution. The same
+  publication's 4D-FlowP acquisition, at the same 1.7-1.8 mm and 60 ms, encodes the acceleration as well and reaches
+  slope 0.95 (next item).
   - **The 2D phase-contrast series do not resolve the jet.** P2 baseline has three single-slice through-plane series,
     INLET, OUTLET (13 cm lower) and BRANCHES (head vessels): 28 frames per beat (37.5 ms) against the 4D flow's 17,
     but 1.875 mm pixels and 6 mm slices, near-axial planes for flow measurement. They would add timing and the flow
     split as another voxel-averaged data term on the same network, not the jet's peak speed. Not built.
+- **4D-FlowP: the measured acceleration (desktop, 2026-10-23).** Every case has a second acquisition in the archive,
+  `Imaging/<case>/4DFlowP/data.npz` (about 2.1 GB per case; fetch with `scripts/remote_zip.py ... --get
+  'Imaging/<case>/4DFlowP/*'`), not used so far. It holds `velocity` (cm/s) and `acceleration` (m/s^2), both
+  (3, x, y, z, 17) with x = FH, y = RL, z = AP at 1.7 x 1.8 x 1.8 mm and 60 ms (venc 250 cm/s, aenc 300 m/s^2), an
+  approximate vessel mask (38,860 voxels on P2 baseline) and the complex time-averaged images. No scanner geometry:
+  registering it to the conventional 4D flow (and the catheter planes) is a separate step, not done yet.
+  - **Velocity:** p99 1.43 m/s at peak flow (frame 4), as the conventional scan (1.42). **Acceleration:** p99 about
+    80 m/s^2 in systole (p99.9 up to 177), 14 in diastole; per-component noise about 3.0 m/s^2 (diastolic RMS).
+  - **What it measures** (`scripts/flowp_material_accel.py`): smoothing velocity and measured acceleration alike
+    (Gaussian, sigma 1-1.5 voxels), the measured field follows the material acceleration dv/dt + (v . grad) v
+    derived from the scan's own velocity (correlation +0.46-0.53, slope +0.40-0.58 in the systolic jet) and not the
+    local dv/dt alone (correlation ~0). So it is the fluid's material acceleration, rho Du/Dt in the momentum
+    equation, and its signs match the velocity's (the velocity's own divergence also picks the stated signs).
+  - **First estimate** (`scripts/flowp_checks.py`): rho times the measured acceleration (3x3x3 mean in the mask)
+    integrated along a lumen path from the ascending to the descending aorta at matched heights 30, 50 and 70 mm below
+    the arch (path 147-230 mm): peak **9.8-9.9 mmHg**, mean 1.4-1.8, nearly independent of the height. The same
+    integral of the velocity-derived acceleration gives 19 / 3.9, but differentiation triples its noise (RMS 28-41
+    against 12-14 m/s^2) and a single path through a noisy field is path-dependent, so that number is not reliable.
+    One centre line, no plane averages, no catheter positions: a sanity check only. It is above every velocity-only
+    estimate (7.3-8.0) and below the catheter (13.1).
+  - **Next:** register 4D-FlowP to the conventional scan and the catheter planes; then a data term in `coa_mri`
+    matching the network's voxel-averaged material acceleration to the measured one. No physics-informed network
+    using acceleration-encoded MRI was found in a literature search (abstract level, 2026-10-23).
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`docs/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
