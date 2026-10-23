@@ -608,6 +608,34 @@ is not meaningful then (the JAX peak is).
     the acceleration, the acceleration alone), against the source publication's 4D-FlowP slope of 0.95. The difference
     may be in where and how the drop is read (their catheter-matched locations and averaging against our 2D-PC planes,
     with the upstream plane moved 18 mm down the ascending aorta), not in the data. Next: their exact ΔP definition.
+  - **The source publication's method (PMC13252443, read 2026-10-24).** Catheters in the AAo proximal to the
+    brachiocephalic trunk and in the DAo two vertebral spaces above the diaphragm, located on MRI by gel markers;
+    catheter ΔP = the maximum AAo-DAo difference, averaged over five cycles. MRI pressure from a pressure Poisson
+    equation, laplacian P = -rho div a, over the segmented fluid mask (first-order differences, LSMR, viscous and
+    gravity terms neglected, no regularisation), a from velocity gradients (4D Flow) or measured (4D-FlowP); ΔP = the
+    maximum difference of the cross-section means at the catheter slices. 4D-FlowP was reconstructed at a 40 ms phase
+    interval (the released file: 60 ms, 17 frames). Table 2, peak drop in mmHg, 4D Flow / 4D-FlowP / FSI / catheter:
+
+    | case (our name) | 4D Flow | 4D-FlowP | FSI | catheter |
+    |---|---|---|---|---|
+    | P1 baseline lowflow (Q1) | 3.9 | 16.4 | 10.5 | 9.1 |
+    | P1 baseline (Q2) | 5.6 | 22.5 | 18.1 | 16.3 |
+    | P1 severe lowflow (Q1) | 6.3 | 14.6 | 16.7 | 13.5 |
+    | P1 severe (Q2) | 13.4 | 23.7 | 29.3 | 24.8 |
+    | P2 baseline lowflow (Q1) | 3.8 | 7.9 | 7.1 | 7.3 |
+    | P2 baseline (Q2) | 6.4 | 15.9 | 9.0 | 13.2 |
+    | P2 severe lowflow (Q1) | 9.0 | 13.0 | 9.2 | 12.2 |
+    | P2 severe (Q2) | 15.2 | 27.6 | 17.8 | 20.9 |
+
+    (Our catheter peaks match their Q2 for the normal-flow cases and Q1 for the low-flow ones.) Their 4D Flow on P2
+    baseline (6.4) agrees with ours (pressure Poisson 7.9, networks 5.3-6.1); their 4D-FlowP (15.9) is three times our
+    acceleration-only fit (5.33) of the released data. 4D-FlowP's slope of 0.95 averages over-estimates: P1 baseline
+    lowflow 16.4 against 9.1, P2 severe 27.6 against 20.9.
+  - **The acceleration's scale is right** (`claude helper/diagnostics/flowp_accel_scale.py`). In straight sections of
+    one limb the cross-section mean a_FH against d/dt of the mean v_FH: ratio 0.97 and 1.35 where they correlate best
+    (0.79, 0.94); other sections are noisy or curved. No unit factor of three. Remaining candidates for 5.3 against
+    15.9: the 40 ms reconstruction behind the paper against the released 60 ms frames, the slice positions (theirs at
+    the gel markers, ours at the 2D-PC planes), and an unregularised Poisson solve of the measured divergence.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`claude helper/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
