@@ -589,6 +589,25 @@ is not meaningful then (the JAX peak is).
       (`_test_accel_frac_smag`) continued 40k steps (60k in total) with `accel_pressure`, the learning rate resumed at
       4.538e-4 without warm-up (the 60k schedule's value at 20k). Adam's moments, the adaptive weights and the RAD
       pool restart. Published to the model repository when it finishes.
+    - **First evaluation (5k into the continuation):** grad p reached the measured acceleration at the noise level
+      (pacc fit 0.695 -> 0.510, noise alone about 0.5) and the velocity fit improved (0.372 -> 0.339), but the peak
+      fell 6.00 -> 5.31 mmHg and the mean 1.19 -> 0.02.
+  - **The measured acceleration alone implies 5.3 mmHg at the catheter planes**
+    (`claude helper/diagnostics/flowp_pressure_fit.py`, CPU, 2.5 min). A fresh pressure network fitted only to
+    grad p = -a over the 537,438 shared voxel-frames (acc_frac) fits to 0.486, the noise level, and gives a peak drop
+    of **5.33 mmHg** with a mean of **-0.08**. That is the projection of the measured field onto pressure gradients:
+    the continuation run is converging to what the data implies, not failing to train. The 9.9 mmHg centre-line
+    integral (flowp_checks.py) also counted the field's curl part, which no pressure can carry, and was optimistic.
+    Over the beat the fitted drop follows the catheter's timing (+5.3 at 134 ms, -4.7 at 468 ms) and stays at -1.1 to
+    -1.5 mmHg in diastole, where the catheter reads +1 to +2.5.
+  - **A background offset in the acceleration is not the cause** (`claude helper/diagnostics/flowp_background.py`).
+    In the static gel (681,439 voxels with signal, 3 voxels away from the lumen) the measured acceleration averages
+    +0.10 to +0.23 m/s^2 per component, steady over the frames (velocity 2-4 mm/s); a quadratic field explains 2-6% of
+    its variance. Over a 20 cm path that offset is about 0.3 mmHg, not the 1.3-1.5 mmHg diastolic gap.
+  - **Open:** every route on P2 baseline now meets at 5.3-6.1 mmHg peak at these planes (networks with and without
+    the acceleration, the acceleration alone), against the source publication's 4D-FlowP slope of 0.95. The difference
+    may be in where and how the drop is read (their catheter-matched locations and averaging against our 2D-PC planes,
+    with the upstream plane moved 18 mm down the ascending aorta), not in the data. Next: their exact ΔP definition.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`claude helper/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
