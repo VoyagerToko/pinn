@@ -657,6 +657,16 @@ is not meaningful then (the JAX peak is).
     default network is within 0.5 mmHg of the grid solve; capacity is not the limit. Use `acc` for the pressure.
   - **With the released data, ~7-7.7 mmHg is the ceiling for acceleration-driven pressure at these planes**
     (Bernoulli 8.0, catheter 13.1); the publication's 15.9 is not in the released file.
+  - **Every input meets at 7-8 mmHg on the same voxels** (`claude helper/diagnostics/flowp_velocity_ppe.py`, CPU).
+    The same least-squares solve on the scan's 31,614 shared voxels, read at the catheter planes, peak (mean):
+    acceleration from the conventional velocity 7.71 (1.15), with Gaussian smoothing sigma 0.7 / 1.0 voxel 7.38 / 7.25;
+    from the registered 4D-FlowP velocity 8.25 (1.45), smoothed 7.10 / 6.56; measured acceleration 7.08 (0.01). The
+    10.8 mmHg of 4D-FlowP's own velocity on its native grid shrinks to this on the scan's voxels and falls fastest
+    under smoothing: mostly derivative noise of its more undersampled velocity (R 5.25 against 2), not flow.
+  - **The networks are below a plain solve of their own data.** The conventional velocity's grid solve gives 7.71;
+    the networks at 20k reached 5.3-6.1 with the jet smoother than the scan (velocity fit 0.35). The 60k runs A and B
+    (pressure network + Smagorinsky + the measured acceleration `acc` as data, B also with `accel_pressure`) are
+    running; ~7.5-8 mmHg is the realistic target with this data.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`claude helper/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
