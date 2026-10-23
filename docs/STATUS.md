@@ -554,8 +554,25 @@ is not meaningful then (the JAX peak is).
     acquisition window like the velocity, to the registered measurement at the shared voxel-frames (537,438 on P2
     baseline). Checked on the CPU: Du/Dt by forward-mode directions against central differences 1.3e-3; the losses are
     finite on the real file; a default config's loss terms are unchanged.
-  - **Running (desktop, 2026-10-23):** P2 baseline, Smagorinsky 0.17 + pressure network + the acceleration term,
-    20k steps, `acc` (`runs/_test_accel_smag`) and `acc_frac` (`runs/_test_accel_frac_smag`), not published yet.
+  - **Tests (desktop, 2026-10-23):** P2 baseline, Smagorinsky 0.17 + pressure network + the acceleration term,
+    20k steps, `acc` (`runs/_test_accel_smag`) and `acc_frac` (`runs/_test_accel_frac_smag`), published to the model
+    repository under these names. Peak / mean drop (mmHg) and the acceleration fit (relative L2 against the measured
+    acceleration at voxel centres; noise alone would leave about 0.5):
+
+    | step | acc: peak | mean | accel fit | acc_frac: peak | mean | accel fit |
+    |---|---|---|---|---|---|---|
+    | 5000 | 2.23 | 0.54 | 0.965 | 2.24 | 0.56 | 0.991 |
+    | 10000 | 4.76 | 1.13 | 0.836 | 4.65 | 1.04 | 0.859 |
+    | 15000 | 5.65 | 1.20 | 0.784 | 5.64 | 1.26 | 0.771 |
+    | 20000 | 5.77 | 1.10 | 0.775 | **6.04** | **1.20** | 0.748 |
+
+    - Against Smagorinsky without acceleration at 20k (6.05 / 0.92): the mean drop rises by about 30% (the lost
+      energy the term was meant to add), the peak does not. Velocity fit unchanged (0.35-0.37). `acc_frac` is better
+      on every measure, so the data favour the half-frame shift.
+    - The network matches the measured acceleration only partly (0.75 against a noise floor near 0.5): a smooth field
+      has to reproduce 80 m/s^2 systolic spikes while matching the velocity and the physics, and 20k steps leave it
+      short. The raw path estimate from the same data reached 9.9 mmHg. Longer training is the first step; a heavier
+      acceleration weight would be a calibration (one case, then scored on the others).
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`claude helper/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
