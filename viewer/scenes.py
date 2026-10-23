@@ -74,7 +74,7 @@ SCENES: List[SceneSpec] = [
               emitter={"x": 0.55, "rows": 24, "per_step": 24}, chart="pressure_drop", evidence="pressure", tab="real"),
 ]
 # real data: a 3D-printed aorta in 4D flow MRI, all 8 phantom cases (2 patients x 2 coarctation grades x 2 flow rates).
-# Each case shows two networks side by side: laminar (this spec) and with a learned eddy viscosity (its partner).
+# Each case shows two networks side by side: laminar (this spec) and with an eddy viscosity (its partner).
 # Pigment is released at the upstream catheter plane (seeds from the server).
 for _p in ("P1", "P2"):
     for _flow in ("", "_lowflow"):

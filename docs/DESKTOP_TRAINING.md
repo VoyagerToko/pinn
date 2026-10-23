@@ -38,6 +38,10 @@ pressure Poisson estimate, simplified Bernoulli, and both networks, with the slo
     and so did a run with `nu_t_reg_weight=0.001` (10.6 -> 0.35 by 15k; 0.10 mmHg). Along the vessel the momentum
     residual, not the pressure, carries the flow's acceleration (`scripts/coa_momentum_path.py`; STATUS.md). **The
     queue is stopped**: do not restart the driver for the phantom runs until that is resolved.
+  - **The P2 baseline viewer slots hold 20k-step tests (2026-10-23, prep v5, published):** `runs/coa_P2_baseline` is
+    `_test_pnet_cold` (laminar, pressure network, 5.28 mmHg) and `runs/coa_P2_baseline_eddy` is `_test_smag_sub4`
+    (Smagorinsky C_s 0.17, 6.05 mmHg); each has a `SOURCE.txt`. The driver counts them as done; move them aside before
+    a full 60k run. The earlier runs are kept as `coa_P2_baseline_v4_shared` and `coa_P2_baseline_eddy_killed_v5`.
   - Laptop, 2026-10-23: a pressure fitted alone to `coa_P2_baseline`'s frozen velocity gives 7.26 mmHg with a third
     less momentum residual than the joint network's (`scripts/coa_pressure_fit.py`), and follows the catheter's
     waveform at correlation 0.96. The pressure is in the flow; joint training fails to extract it.

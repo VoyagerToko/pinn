@@ -33,7 +33,7 @@ CAPTIONS = {
 }
 CAPTIONS["stenosis_fast"] = CAPTIONS["stenosis"]
 _COA_CAPTION = ("Real scanner data, real catheter. Left tank: the laminar network, physics at the fluid's own viscosity. Right tank: "
-                "the network that may add a learned eddy viscosity where the jet spreads and decays. The bars are every phantom case: the "
+                "the network that adds an eddy viscosity where the jet spreads and decays. The bars are every phantom case: the "
                 "catheter's peak pressure drop next to the conventional 4D-flow estimate, the clinical Bernoulli rule and both networks.")
 _COA_SIDS = [s.sid for s in S.SCENES if s.partner]
 for _sid in _COA_SIDS:

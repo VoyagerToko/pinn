@@ -1,5 +1,5 @@
 """The real-data comparison: peak trans-coarctation pressure drop from the catheter, against the physics-informed networks
-(laminar and with a learned eddy viscosity) and the two conventional estimates from the same 4D flow scan (the pressure
+(laminar and with an eddy viscosity, learned or Smagorinsky) and the two conventional estimates from the same 4D flow scan (the pressure
 Poisson estimate and simplified Bernoulli), for every prepared case of the 4D-FlowP coarctation phantom.
 
     python scripts/coa_report.py                    # -> runs/coa_report/{report.json, report.md}
@@ -77,7 +77,7 @@ def main():
             r[f"{tag}_peak_mmHg"] = ev["dp_peak_pinn_mmHg"] if ev and current else None
         rows.append(r)
     methods = [("ppe", "conventional 4D flow (pressure Poisson)"), ("bernoulli", "simplified Bernoulli 4 v^2"),
-               ("pinn_laminar", "network, laminar"), ("pinn_eddy", "network, learned eddy viscosity")]
+               ("pinn_laminar", "network, laminar"), ("pinn_eddy", "network, eddy viscosity")]
     cath = [r["catheter_peak_mmHg"] for r in rows]
     summary = {}
     for key, label in methods:

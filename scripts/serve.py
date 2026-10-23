@@ -164,14 +164,14 @@ REGISTRY: Dict[str, Dict] = {
 }
 
 
-# the real coarctation phantom: one scene per network, laminar and with a learned eddy viscosity, for all 8 cases
+# the real coarctation phantom: one scene per network, laminar and with an eddy viscosity (learned or Smagorinsky, as the run's config says), for all 8 cases
 from pinnflow.coa_phantom import CASES as _COA_CASES  # noqa: E402
 
 for _case in _COA_CASES:
     for _eddy in (False, True):
         _sid = f"coa_{_case}" + ("_eddy" if _eddy else "")
         _label = _case.replace("_lowflow", ", low flow").replace("_", " ")
-        _kind = "with a learned eddy viscosity" if _eddy else "laminar"
+        _kind = "with an eddy viscosity" if _eddy else "laminar"
         REGISTRY[_sid] = {
             "run": _sid,
             "benchmark": "coa_mri",
@@ -182,7 +182,7 @@ for _case in _COA_CASES:
             "status": "not trained",
             "gate": "peak trans-coarctation pressure drop within 20% of the catheter",
             "measured": "",
-            "summary": f"A 3D-printed copy of a patient's aorta with a coarctation ({_label}), in a pulsing flow loop, scanned by a real MRI (Stanford 4D-FlowP phantom, CC BY-NC 4.0). The catheter measured the pressure drop; the networks see only the scan. Left: laminar physics. Right: a learned eddy viscosity for the turbulent loss.",
+            "summary": f"A 3D-printed copy of a patient's aorta with a coarctation ({_label}), in a pulsing flow loop, scanned by a real MRI (Stanford 4D-FlowP phantom, CC BY-NC 4.0). The catheter measured the pressure drop; the networks see only the scan. Left: laminar physics. Right: an eddy viscosity for the turbulent loss.",
             "reference": "catheter pressure, upstream and downstream of the coarctation, averaged over 30+ beats",
             "controls": {"t": [0.0, 107.0]},
         }
