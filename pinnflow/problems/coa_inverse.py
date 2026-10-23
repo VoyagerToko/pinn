@@ -22,6 +22,12 @@ With ``problem.smagorinsky_cs`` > 0 the eddy viscosity is not learned but comput
 nu_t = (C_s Delta)^2 |S| with |S| = sqrt(2 S_ij S_ij) and Delta the voxel size, in the same stress divergence. It cannot be
 switched off where the flow shears (the learned field collapsed to ~0 in every run) and needs no penalty.
 
+With ``problem.accel_data`` the loss also matches the network's material acceleration Du/Dt = u_t + (u . grad) u,
+averaged over each voxel and acquisition window like the velocity, to the acceleration measured by 4D-FlowP (terms
+acc_u, acc_v, acc_w). The pressure gradient balances rho Du/Dt, so this constrains the pressure where the blurred
+velocity cannot: a voxel-averaged acceleration keeps the jet's sub-voxel convective and turbulent part, which the
+acceleration of the voxel-averaged velocity loses.
+
 With ``problem.pressure_net`` the pressure comes from a second, separate network instead of the velocity network's fourth
 output: exactly periodic over the beat through explicit time harmonics, with isotropic multi-scale Fourier features in
 space (``PressureMLP``, ``_p_features``). Trained jointly with the velocity, it is what the momentum terms act on. The
@@ -118,6 +124,24 @@ class CoarctationMRIInversePINN(Problem):
             raise ValueError("problem.smagorinsky_cs and problem.eddy_viscosity are alternatives; set one")
         dmm = p.get("smagorinsky_delta_mm", None)
         self.smag_delta = (float(dmm) * mm) if dmm else float(np.prod(self.voxel) ** (1.0 / 3.0))
+        # measured material acceleration (problem.accel_data): the 4D-FlowP acquisition encodes Du/Dt, registered onto
+        # this scan's voxels and frames by claude helper/diagnostics/flowp_register.py (<case>_flowp.npz: acc (F, N, 3) m/s^2 in the local
+        # frame, inside (N,) where 4D-FlowP covers the lumen)
+        self.accel = bool(p.get("accel_data", False))
+        if self.accel:
+            fa = Path(p.get("accel_file", None) or f.with_name(f"{self.case}_flowp.npz"))
+            if not fa.exists():
+                raise FileNotFoundError(f"{fa} missing; register 4D-FlowP with: python \"claude helper/diagnostics/flowp_register.py\" --case {self.case}")
+            da = np.load(fa)
+            acc = np.asarray(da[str(p.get("accel_key", "acc"))], np.float32) * (L_REF / U_REF**2)  # m/s^2 -> length / time^2
+            if acc.shape[:2] != (F, N):
+                raise ValueError(f"{fa}: acc {acc.shape} does not match the scan's (frames, voxels) = {(F, N)}")
+            inside = np.asarray(da["inside"], bool)
+            fi, ni = np.nonzero(np.broadcast_to(inside[None], (F, N)))
+            self.acc_idx = jnp.asarray((fi * N + ni).astype(np.int32))  # voxel-frames of train_c with a measurement
+            self.train_acc = jnp.asarray(acc.reshape(F * N, 3))
+            for k in ("acc_u", "acc_v", "acc_w"):
+                self.init_weights.setdefault(k, 1.0)
         self.cath_phase = np.asarray(d["cath_phase_s"])
         self.cath_dp = np.asarray(d["cath_dp_mmHg"])
         self.cath_peak = float(d["cath_dp_peak_mmHg"])
@@ -285,13 +309,35 @@ class CoarctationMRIInversePINN(Problem):
         tw = jax.random.uniform(ks[4], (nw, 1), minval=0.0, maxval=self.T)
         da = jnp.asarray(self.dao.mean(0))
         ta = jax.random.uniform(ks[5], (nw, 1), minval=0.0, maxval=self.T)
-        return {
+        batch = {
             "data": data, "data_uvw": self.train_uvw[idx],
             "res": self.draw_collocation(ks[6], int(cfg.res_batch_size)),
             "wall": jnp.concatenate([tw, self.wall[wi]], 1),
             "anchor": jnp.concatenate([ta, jnp.broadcast_to(da, (nw, 3))], 1),
             **self._common_batch_fields(),
         }
+        if self.accel:  # measured accelerations, averaged over the same voxel cube and acquisition window as the velocity
+            ka = jax.random.split(ks[7], 3)
+            Ba = int(cfg.get("acc_batch_size", B))
+            ia = self.acc_idx[jax.random.randint(ka[0], (Ba,), 0, self.acc_idx.shape[0])]
+            ax = (jax.random.uniform(ka[1], (Ba * S, 3)) - 0.5) * jnp.asarray(self.voxel)
+            at = (jax.random.uniform(ka[2], (Ba * S, 1)) - 0.5) * self.window
+            batch["acc"] = jnp.repeat(self.train_c[ia], S, axis=0) + jnp.concatenate([at, ax], 1)
+            batch["acc_target"] = self.train_acc[ia]
+        return batch
+
+    def material_acceleration_fn(self, params):
+        """z -> Du/Dt = u_t + (u . grad) u of the network's velocity (non-dimensional), by forward-mode directions."""
+        g = self.net(params)
+
+        def acc(z):
+            u = g(z)[:3]
+            a = physics.directional(g, z, 0)[:3]
+            for j, s in enumerate((1, 2, 3)):
+                a = a + u[j] * physics.directional(g, z, s)[:3]
+            return a
+
+        return acc
 
     # ------------------------------------------------------------------ losses
     def losses(self, params, batch) -> Dict[str, jnp.ndarray]:
@@ -305,6 +351,10 @@ class CoarctationMRIInversePINN(Problem):
         out["p_anchor"] = mse(f(batch["anchor"])[:, 3])
         if self.eddy:
             out["nu_t_reg"] = jnp.mean(f(batch["res"])[:, 4]) / self.nu_t_scale
+        if self.accel:
+            Ba = batch["acc_target"].shape[0]
+            pa = self.vmap_pointwise(self.material_acceleration_fn(params))(batch["acc"]).reshape(Ba, self.n_sub, 3).mean(1)
+            out.update({k: mse(pa[:, i], batch["acc_target"][:, i]) for i, k in enumerate(("acc_u", "acc_v", "acc_w"))})
         return out
 
     # ------------------------------------------------------------------ evaluation
@@ -348,6 +398,13 @@ class CoarctationMRIInversePINN(Problem):
             else:
                 nut = np.asarray(jax.jit(jax.vmap(self.smagorinsky_fn(params)))(pts))
             extra = {"nu_t_mean_over_nu": float(nut.mean() * self.Re), "nu_t_p99_over_nu": float(np.percentile(nut, 99) * self.Re)}
+        if self.accel:  # material acceleration at the voxel centres against the measured one (noisy: ~3 m/s^2 per component)
+            ia = np.asarray(self.acc_idx)[np.linspace(0, len(self.acc_idx) - 1, min(8192, len(self.acc_idx))).astype(int)]
+            if not hasattr(self, "_acc_jit"):
+                self._acc_jit = jax.jit(lambda prm, z: jax.vmap(self.material_acceleration_fn(prm))(z))
+            pa = np.asarray(self._acc_jit(params, self.train_c[ia]))
+            ra = np.asarray(self.train_acc)[ia]
+            extra["accel_fit_rel"] = float(np.linalg.norm(pa - ra) / np.linalg.norm(ra))
         extra["data_prep_version"] = int(self.d.get("prep_version", 0))
         extra["pressure_net"] = int(self.pressure_net)
         extra["cath_shift_ms"] = 1e3 * self.cath_shift

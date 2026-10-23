@@ -203,6 +203,11 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         # learned one collapses to 0, docs/STATUS.md 2026-10-23). 0 = off; 0.17 is Lilly's value. Delta defaults to the voxel size.
         p.smagorinsky_cs = 0.0
         p.smagorinsky_delta_mm = None
+        # measured material acceleration from 4D-FlowP (registered: claude helper/diagnostics/flowp_register.py -> prepared/<case>_flowp.npz),
+        # matched like the velocity, averaged over each voxel and acquisition window. Off by default.
+        p.accel_data = False
+        p.accel_file = None
+        p.accel_key = "acc"  # "acc_frac": the 4D-FlowP frames shifted half a frame (30 ms) to the scan's clock
         # the pressure from its own network (periodic time harmonics, isotropic multi-scale space features), trained jointly;
         # the shared fourth output left the systolic acceleration in the momentum residual (docs/STATUS.md, 2026-10-23)
         p.pressure_net = True

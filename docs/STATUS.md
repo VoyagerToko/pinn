@@ -534,9 +534,28 @@ is not meaningful then (the JAX peak is).
     against 12-14 m/s^2) and a single path through a noisy field is path-dependent, so that number is not reliable.
     One centre line, no plane averages, no catheter positions: a sanity check only. It is above every velocity-only
     estimate (7.3-8.0) and below the catheter (13.1).
-  - **Next:** register 4D-FlowP to the conventional scan and the catheter planes; then a data term in `coa_mri`
-    matching the network's voxel-averaged material acceleration to the measured one. No physics-informed network
-    using acceleration-encoded MRI was found in a literature search (abstract level, 2026-10-23).
+  - No physics-informed network using acceleration-encoded MRI was found in a literature search (abstract level,
+    2026-10-23).
+  - **Registration onto the conventional scan** (`claude helper/diagnostics/flowp_register.py --case P2_baseline`, CPU,
+    24 s; output `data/stanford_coa/prepared/P2_baseline_flowp.npz`, 26 MB, not committed). The 4D-FlowP array axes
+    are the patient axes, each increasing along LPS (FH -> +z, RL -> +x, AP -> +y), with the stored component signs.
+    The translation comes from an FFT mask cross-correlation and is refined on the systolic velocity: voxel (0,0,0) is
+    at LPS (-118.3, -38.7, -244.1) mm, uncertain to about 1.5 mm. Rotation is not needed (a fitted 0.5 degree did not
+    help).
+    - Mask Dice 0.856 against 0.593 for the next sign combination.
+    - Systolic velocity at the 31,614 shared voxels (93% of the scan's 33,980): correlation 0.84 / 0.94 / 0.66 per
+      local component (main flow 0.94), 0.87 overall, slope 0.80.
+    - Upstream-plane flux per frame: 4D-FlowP 59.8 mL/s mean against the scan's 62.0 (meter 67.7), correlation 0.982.
+    - Integer frame offset 0. The data agree better with the 4D-FlowP frames shifted +0.4 to +0.5 frame (about 30 ms),
+      so both are stored: `acc` (as registered) and `acc_frac` (half a frame, linear in time). Acceleration noise
+      2.85 m/s^2 per component (calm frames).
+  - **The acceleration term** (`problem.accel_data`, off by default; `problem.accel_key` = `acc` or `acc_frac`). Terms
+    acc_u, acc_v, acc_w match the network's material acceleration u_t + (u . grad) u, averaged over each voxel and
+    acquisition window like the velocity, to the registered measurement at the shared voxel-frames (537,438 on P2
+    baseline). Checked on the CPU: Du/Dt by forward-mode directions against central differences 1.3e-3; the losses are
+    finite on the real file; a default config's loss terms are unchanged.
+  - **Running (desktop, 2026-10-23):** P2 baseline, Smagorinsky 0.17 + pressure network + the acceleration term,
+    20k steps, `acc` (`runs/_test_accel_smag`) and `acc_frac` (`runs/_test_accel_frac_smag`), not published yet.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`claude helper/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
