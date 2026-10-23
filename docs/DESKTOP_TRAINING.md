@@ -32,14 +32,31 @@ pressure Poisson estimate, simplified Bernoulli, and both networks, with the slo
 - **Findings so far (2026-10-23; details in STATUS.md, "Real data").**
   - Since the sign fix (prep v4) the conventional pressure Poisson estimate reads slope 0.52 against the catheter,
     near the published 0.63. The data is sound.
-  - `coa_P2_baseline` (laminar, prep v4): 0.30 against 13.1 mmHg. Its jet is there, 9% too slow, but its pressure
-    falls about 4 mmHg through the narrowing and recovers downstream: laminar physics has no term for the
-    turbulent loss the catheter measures. More laminar runs will not fix this; the eddy-viscosity network is the test.
-  - If an eddy run ends with `nu_t_mean_over_nu` near 0 again, rerun it with `--set problem.nu_t_reg_weight=0.001`.
+  - `coa_P2_baseline` (laminar, prep v4): 0.30 against 13.1 mmHg. Its jet is there, 9% too slow. (An earlier note
+    here said its pressure recovers downstream under laminar physics; that was wrong, see the next items.)
   - Desktop, later on 2026-10-23: the eddy run with RAD collapsed too (nu_t/nu 2.5 at 5k, 0.002 at 30k; 0.10 mmHg),
     and so did a run with `nu_t_reg_weight=0.001` (10.6 -> 0.35 by 15k; 0.10 mmHg). Along the vessel the momentum
     residual, not the pressure, carries the flow's acceleration (`scripts/coa_momentum_path.py`; STATUS.md). **The
     queue is stopped**: do not restart the driver for the phantom runs until that is resolved.
+  - Laptop, 2026-10-23: a pressure fitted alone to `coa_P2_baseline`'s frozen velocity gives 7.26 mmHg with a third
+    less momentum residual than the joint network's (`scripts/coa_pressure_fit.py`), and follows the catheter's
+    waveform at correlation 0.96. The pressure is in the flow; joint training fails to extract it.
+- **The pressure-network test (do this before any phantom run; the queue stays stopped until it passes).**
+  - The repository now has `problem.pressure_net` (the `coa_mri` default): the pressure from its own, periodic network.
+    It is untested in joint training. Prep v5 also adds the catheter's clock offset, so every prepared case and every
+    earlier phantom run counts as stale: **do not start `desktop_train_all.sh`**, it would move all phantom runs aside
+    and retrain all 16 with the untested change.
+  - Re-prepare only what the test needs: `python -u scripts/prepare_coa.py --case P2_baseline`. Expect
+    `cath_shift_ms` near -147 and `cath_shift_corr` near 0.97.
+  - Warm test (velocity from the trained `runs/coa_P2_baseline`, a fresh pressure network):
+    `python -u scripts/coa_pressure_net_test.py --steps 6000 > runs/_test_pnet_warm.log 2>&1`.
+  - Cold test (everything from scratch, as a real run):
+    `python -u scripts/train.py --benchmark coa_mri --set "problem.case='P2_baseline'" --steps 20000 --workdir runs/_test_pnet_cold > runs/_test_pnet_cold.log 2>&1`.
+    For comparison, the old network had 0.24 mmHg at 5k and 0.25 at 20k.
+  - **Pass:** `eval/dp_peak_pinn_mmHg` climbs well above 1 mmHg and keeps rising (the stand-alone fit reached 7.26).
+    **Fail:** it stays near 0.3 while the momentum residual falls. Report the eval lines (every 5000 steps for the cold
+    run, every 500 for the warm one), and on fail run `python scripts/coa_momentum_path.py _test_pnet_cold`.
+  - If an eddy run ends with `nu_t_mean_over_nu` near 0 again, rerun it with `--set problem.nu_t_reg_weight=0.001`.
 - **RAD for `coa_mri` needs this repository at or after the commit "Phantom: RAD of collocation points and data".**
   - Before it, `--set training.rad_every=1000` was accepted but did nothing for this problem: no residual function,
     so the resampling was skipped silently. A run started on older code is uniform sampling whatever its log says.

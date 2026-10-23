@@ -20,7 +20,7 @@ import numpy as np
 from .data import DATA_DIR
 
 COA_DIR = DATA_DIR / "stanford_coa"
-PREP_VERSION = 4  # 4: velocity component signs fixed from the data (3: background correction, speed segmentation)
+PREP_VERSION = 5  # 5: catheter clock aligned to the scan's (4: velocity signs; 3: background correction, segmentation)
 CASES = ["P1_baseline", "P1_severe", "P2_baseline", "P2_severe",
          "P1_baseline_lowflow", "P1_severe_lowflow", "P2_baseline_lowflow", "P2_severe_lowflow"]
 
@@ -67,6 +67,24 @@ def beat_average(t: np.ndarray, y: np.ndarray, ref: np.ndarray, n: int = 200):
     ph = np.linspace(0.0, per, n, endpoint=False)
     beats = np.stack([np.interp(t[i] + ph, t, y) for i in keep])
     return ph, beats.mean(0), beats.std(0), float(per), len(keep)
+
+
+def catheter_clock_shift(t_s: np.ndarray, q_scan: np.ndarray, cath_phase_s: np.ndarray, cath_flow: np.ndarray, period_s: float,
+                         window_s: float):
+    """The catheter recording's beat starts where the meter's flow rises through its mean (``beat_average``); the scan's
+    frames count from the MRI trigger. Returns (shift s, correlation): catheter phase = (scan time + shift) mod period.
+
+    It is measured, not assumed: the scan's flux through the upstream plane per frame against the flow meter recorded
+    with the catheter pressures, the meter smoothed over one acquisition window (a frame averages that long), shifted
+    in 2 ms steps for the best correlation. Units do not matter (a correlation)."""
+    fine = np.linspace(0.0, period_s, 2000, endpoint=False)
+    qf = np.interp(fine, cath_phase_s, cath_flow, period=period_s)
+    nb = max(1, int(round(window_s / period_s * len(fine))))
+    qs = np.convolve(np.concatenate([qf[-nb:], qf, qf[:nb]]), np.ones(nb) / nb, "same")[nb:-nb]
+    shifts = np.arange(-0.5 * period_s, 0.5 * period_s, 0.002)
+    cors = np.array([np.corrcoef(q_scan, np.interp((t_s + s) % period_s, fine, qs, period=period_s))[0, 1] for s in shifts])
+    i = int(np.argmax(cors))
+    return float(shifts[i]), float(cors[i])
 
 
 def catheter_pressure_drop(case: str, location: int = 3, root: Path = COA_DIR) -> Dict:
@@ -354,13 +372,14 @@ def prepare_case(case: str, out: Path, root: Path = COA_DIR, z_aao: float = None
     vox_m3 = sp_i * sp_j * dk * 1e-9
 
     def flux_cells(cells_mm, n_world):
+        """The flux through a plane's cells per frame, mL/s."""
         kk = np.round(cells_mm[:, 2] / dk).astype(int)
         ii = np.round(cells_mm[:, 1] / sp_i).astype(int)
         jj = np.round(cells_mm[:, 0] / sp_j).astype(int)
         vn = np.einsum("tnc,c->tn", v[:, kk, ii, jj, :], n_world)
-        return float(vn.sum(-1).mean()) * vox_m3 / (np.mean([sp_i, sp_j, dk]) * 1e-3) * 1e6
+        return vn.sum(-1) * vox_m3 / (np.mean([sp_i, sp_j, dk]) * 1e-3) * 1e6
 
-    q_plane = flux_cells(aao, n_aao)
+    q_plane = float(flux_cells(aao, n_aao).mean())
     aao_shift_mm = 0.0
     if not 0.85 < q_plane / q_meter < 1.15:
         from scipy import ndimage
@@ -392,6 +411,11 @@ def prepare_case(case: str, out: Path, root: Path = COA_DIR, z_aao: float = None
     wf, wn = wall_faces(mask)
     wall_mm = np.stack([wf[:, 2] * sp_j, wf[:, 1] * sp_i, wf[:, 0] * dk], -1)
     cath = catheter_pressure_drop(case, 3, root)
+    # the two clocks: the scan's upstream-plane flux per frame against the meter recorded with the catheter
+    q_frames = flux_cells(aao, n_aao)
+    window_s = float(np.median(np.diff(d["t_s"])))
+    cath_flow_mLs = cath["flow_Lmin"] * 1000 / 60
+    shift_s, shift_corr = catheter_clock_shift(d["t_s"], q_frames, cath["phase_s"], cath_flow_mLs, cath["period_s"], window_s)
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(out, t_s=d["t_s"], vel=loc[:, K, I, J, :].astype(np.float32), pos_mm=pos_mm.astype(np.float32),
@@ -400,13 +424,16 @@ def prepare_case(case: str, out: Path, root: Path = COA_DIR, z_aao: float = None
                         velocity_signs=np.array([d["velocity_signs"]["row"], d["velocity_signs"]["col"], d["velocity_signs"]["slice"]]),
                         aao_normal=n_aao_loc, dao_normal=n_dao_loc, aao_shift_mm=np.float64(aao_shift_mm),
                         aao_flux_mLs=np.float64(q_plane), meter_flow_mLs=np.float64(q_meter),
-                        voxel_mm=np.array([sp_j, sp_i, dk]), frame_window_s=np.float64(np.median(np.diff(d["t_s"]))),
+                        voxel_mm=np.array([sp_j, sp_i, dk]), frame_window_s=np.float64(window_s),
                         period_s=np.float64(cath["period_s"]), venc_ms=np.float64(d["venc_ms"]),
                         cath_phase_s=cath["phase_s"], cath_dp_mmHg=cath["dp_mmHg"], cath_dp_peak_mmHg=np.float64(cath["dp_peak_mmHg"]),
+                        cath_flow_mLs=cath_flow_mLs, aao_flux_frames_mLs=q_frames,
+                        cath_shift_s=np.float64(shift_s), cath_shift_corr=np.float64(shift_corr),
                         rho=np.float64(FLUID["rho"]), mu=np.float64(FLUID["mu"]), case=np.array(case))
     return {"voxels": int(len(K)), "frames": int(v.shape[0]), "wall_faces": int(len(wf)), "aao_cells": int(len(aao)),
             "dao_cells": int(len(dao)), "b_aao_mm": b_aao, "b_dao_mm": b_dao, "aao_shift_mm": aao_shift_mm,
-            "aao_flux_mLs": q_plane, "meter_flow_mLs": q_meter, "period_s": cath["period_s"], "cath_dp_peak": cath["dp_peak_mmHg"]}
+            "aao_flux_mLs": q_plane, "meter_flow_mLs": q_meter, "period_s": cath["period_s"], "cath_dp_peak": cath["dp_peak_mmHg"],
+            "cath_shift_ms": 1e3 * shift_s, "cath_shift_corr": shift_corr}
 
 
 # ------------------------------------------------------------------------------------------------------------

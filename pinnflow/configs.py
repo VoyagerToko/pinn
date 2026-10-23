@@ -199,6 +199,13 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         p.eddy_viscosity = False  # True: learn nu_t(t, x) (5th output) for unresolved turbulent mixing in the jet
         p.nu_t_scale = 0.01
         p.nu_t_reg_weight = 0.01  # fixed weight of the mean-nu_t penalty; lower it if nu_t collapses to 0
+        # the pressure from its own network (periodic time harmonics, isotropic multi-scale space features), trained jointly;
+        # the shared fourth output left the systolic acceleration in the momentum residual (STATUS.md, 2026-10-23)
+        p.pressure_net = True
+        p.pressure_net_harmonics = 12
+        p.pressure_net_width = 128
+        p.pressure_net_depth = 4
+        p.pressure_net_sigmas = (1.0, 4.0, 12.0)
         c.arch.out_dim = 4
         c.arch.num_layers = 6
         c.arch.hidden_dim = 256

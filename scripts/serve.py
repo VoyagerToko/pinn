@@ -59,58 +59,6 @@ from pinnflow.utils import load_params  # noqa: E402
 # registry: which run backs which scene, and the verdict from STATUS.md
 # --------------------------------------------------------------------------------------
 REGISTRY: Dict[str, Dict] = {
-    "coa_p2b": {
-        "run": "coa_P2_baseline",
-        "benchmark": "coa_mri",
-        "case": "P2_baseline",
-        "tab": "real",
-        "title": "Pressure across an aortic coarctation from real 4D flow MRI (P2 baseline, network laminar), against catheter pressure",
-        "status": "not trained",
-        "gate": "peak trans-coarctation pressure drop within 20% of the catheter",
-        "measured": "",
-        "summary": "A 3D-printed copy of a patient's aorta with a coarctation (P2 baseline), in a pulsing flow loop, scanned by a real MRI (Stanford 4D-FlowP phantom, CC BY-NC 4.0). The catheter measured the pressure drop; the network (laminar) sees only the scan.",
-        "reference": "catheter pressure, upstream and downstream of the coarctation, averaged over 30+ beats",
-        "controls": {"t": [0.0, 107.0]},
-    },
-    "coa_p2b_eddy": {
-        "run": "coa_P2_baseline_eddy",
-        "benchmark": "coa_mri",
-        "case": "P2_baseline",
-        "tab": "real",
-        "title": "Pressure across an aortic coarctation from real 4D flow MRI (P2 baseline, network with a learned eddy viscosity), against catheter pressure",
-        "status": "not trained",
-        "gate": "peak trans-coarctation pressure drop within 20% of the catheter",
-        "measured": "",
-        "summary": "A 3D-printed copy of a patient's aorta with a coarctation (P2 baseline), in a pulsing flow loop, scanned by a real MRI (Stanford 4D-FlowP phantom, CC BY-NC 4.0). The catheter measured the pressure drop; the network (with a learned eddy viscosity) sees only the scan.",
-        "reference": "catheter pressure, upstream and downstream of the coarctation, averaged over 30+ beats",
-        "controls": {"t": [0.0, 107.0]},
-    },
-    "coa_p2s": {
-        "run": "coa_P2_severe",
-        "benchmark": "coa_mri",
-        "case": "P2_severe",
-        "tab": "real",
-        "title": "Pressure across an aortic coarctation from real 4D flow MRI (P2 severe, network laminar), against catheter pressure",
-        "status": "not trained",
-        "gate": "peak trans-coarctation pressure drop within 20% of the catheter",
-        "measured": "",
-        "summary": "A 3D-printed copy of a patient's aorta with a coarctation (P2 severe), in a pulsing flow loop, scanned by a real MRI (Stanford 4D-FlowP phantom, CC BY-NC 4.0). The catheter measured the pressure drop; the network (laminar) sees only the scan.",
-        "reference": "catheter pressure, upstream and downstream of the coarctation, averaged over 30+ beats",
-        "controls": {"t": [0.0, 107.0]},
-    },
-    "coa_p2s_eddy": {
-        "run": "coa_P2_severe_eddy",
-        "benchmark": "coa_mri",
-        "case": "P2_severe",
-        "tab": "real",
-        "title": "Pressure across an aortic coarctation from real 4D flow MRI (P2 severe, network with a learned eddy viscosity), against catheter pressure",
-        "status": "not trained",
-        "gate": "peak trans-coarctation pressure drop within 20% of the catheter",
-        "measured": "",
-        "summary": "A 3D-printed copy of a patient's aorta with a coarctation (P2 severe), in a pulsing flow loop, scanned by a real MRI (Stanford 4D-FlowP phantom, CC BY-NC 4.0). The catheter measured the pressure drop; the network (with a learned eddy viscosity) sees only the scan.",
-        "reference": "catheter pressure, upstream and downstream of the coarctation, averaged over 30+ beats",
-        "controls": {"t": [0.0, 107.0]},
-    },
     "stenosis_fast": {
         "run": "stenosis_mri_fast",
         "benchmark": "stenosis_mri",
@@ -216,6 +164,29 @@ REGISTRY: Dict[str, Dict] = {
 }
 
 
+# the real coarctation phantom: one scene per network, laminar and with a learned eddy viscosity, for all 8 cases
+from pinnflow.coa_phantom import CASES as _COA_CASES  # noqa: E402
+
+for _case in _COA_CASES:
+    for _eddy in (False, True):
+        _sid = f"coa_{_case}" + ("_eddy" if _eddy else "")
+        _label = _case.replace("_lowflow", ", low flow").replace("_", " ")
+        _kind = "with a learned eddy viscosity" if _eddy else "laminar"
+        REGISTRY[_sid] = {
+            "run": _sid,
+            "benchmark": "coa_mri",
+            "case": _case,
+            "tab": "phantom",
+            "network": "eddy" if _eddy else "laminar",
+            "title": f"Pressure across an aortic coarctation from real 4D flow MRI ({_label}), network {_kind}, against catheter pressure",
+            "status": "not trained",
+            "gate": "peak trans-coarctation pressure drop within 20% of the catheter",
+            "measured": "",
+            "summary": f"A 3D-printed copy of a patient's aorta with a coarctation ({_label}), in a pulsing flow loop, scanned by a real MRI (Stanford 4D-FlowP phantom, CC BY-NC 4.0). The catheter measured the pressure drop; the networks see only the scan. Left: laminar physics. Right: a learned eddy viscosity for the turbulent loss.",
+            "reference": "catheter pressure, upstream and downstream of the coarctation, averaged over 30+ beats",
+            "controls": {"t": [0.0, 107.0]},
+        }
+
 # --------------------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------------------
@@ -267,6 +238,7 @@ class Scene:
         if "case" in spec and not has_cfg:
             with self.cfg.unlocked():
                 self.cfg.problem.case = spec["case"]
+                self.cfg.problem.eddy_viscosity = spec.get("network") == "eddy"
         if "data_dir" in spec:  # the dataset this scene is served from, relative to the repository root
             with self.cfg.unlocked():
                 self.cfg.problem.data_dir = str(ROOT / spec["data_dir"])
@@ -607,6 +579,8 @@ class Scene:
             return self._cache["curve"]
         pr = self.problem
         out = {"case": pr.case, "period_s": float(pr.d["period_s"]), "cath_phase_s": pr.cath_phase.tolist(), "cath_dp_mmHg": pr.cath_dp.tolist(),
+               # the catheter waveform on the scan's (and the network's) clock, for plotting the two over the beat
+               "cath_shift_s": pr.cath_shift, "cath_t_s": pr.cath_t.tolist(), "cath_dp_scan_mmHg": pr.cath_dp_scan.tolist(),
                "trained": self.trained, "metrics": self.metrics["final_eval"], "rows": []}
         if self.trained:
             tq = np.linspace(0.0, pr.T, 64, endpoint=False)
@@ -828,6 +802,8 @@ class Scene:
         d = {k: v for k, v in self.spec.items()}
         d.update(id=self.id, domain=self.domain, metrics=self.metrics, dims=3 if self.bench_name in ("tgv3d", "coa_mri") else 2, trained=self.trained)
         if self.bench_name == "coa_mri":
+            d["network"] = self.spec.get("network", "laminar")
+        if self.bench_name == "coa_mri":
             d["physical"] = {"period_s": float(self.problem.d["period_s"])}
             ck = self.workdir / "latest.msgpack"
             d["run_stamp"] = f"{int(ck.stat().st_mtime)}" if self.trained and ck.exists() else "data"
@@ -900,8 +876,15 @@ def build_app(runs: Path, only: Optional[List[str]] = None, warm: bool = True):
     for sid, spec in REGISTRY.items():
         if only and sid not in only:
             continue
-        if "runs" in spec:  # serve the first of the listed runs that exists
-            spec = dict(spec, run=next((r for r in spec["runs"] if (runs / r / "config.json").exists()), spec["runs"][0]))
+        if "runs" in spec:  # the first listed run trained on current data, else the first that exists
+            from pinnflow.coa_phantom import PREP_VERSION
+
+            def current(r):
+                fe = read_json(runs / r / "final_eval.json")
+                return (runs / r / "latest.msgpack").exists() and int(fe.get("data_prep_version", 0)) >= PREP_VERSION
+
+            existing = [r for r in spec["runs"] if (runs / r / "config.json").exists()]
+            spec = dict(spec, run=next((r for r in spec["runs"] if current(r)), existing[0] if existing else spec["runs"][0]))
         wd = runs / spec["run"]
         data_only = (spec["benchmark"] == "stenosis_mri" and (ROOT / spec.get("data_dir", "data/stenosis") / "mri.npz").exists()) or \
                     (spec["benchmark"] == "coa_mri" and (DATA_DIR / "stanford_coa" / "prepared" / f"{spec.get('case', '')}.npz").exists())

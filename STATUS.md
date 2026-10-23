@@ -391,6 +391,41 @@ is not meaningful then (the JAX peak is).
     check (CPU, no training): whether the scan's own frame-to-frame acceleration is consistent with a rigid,
     incompressible vessel (phantom wall compliance, the 60 ms acquisition window against the ~60 ms frame spacing,
     the frame times against the catheter phase), and the per-time pressure anchor at the DAo centre.
+- **The pressure is in the velocity field; joint training does not extract it (laptop, 2026-10-23).**
+  - `scripts/coa_pressure_fit.py` freezes the trained velocity of laminar `coa_P2_baseline` (prep v4), computes
+    F = u_t + (u . grad) u - nu lap u at 262,144 points over the lumen and the beat, and fits a separate pressure network
+    alone: min mean |F + grad p|^2 (8000 Adam steps, CPU, 28 min). That is the pressure Poisson projection of the
+    network's own flow, with the no-flux wall condition arising naturally.
+
+    | | peak drop (mmHg) | mean over the beat | mean square momentum residual |
+    |---|---|---|---|
+    | the joint network's own pressure | 0.30 | 0.00 | 1.17e-3 |
+    | pressure fitted to the same velocity | **7.26** | 0.85 | **7.7e-4** (34% lower) |
+    | catheter | 13.1 | 3.68 | |
+
+  - The fitted drop follows the catheter's waveform over the beat with correlation **0.96** once the catheter's clock is
+    shifted by -118 ms (next item): up to +5.5 mmHg while the flow accelerates, -3.0 while it decelerates. The flat
+    joint pressure is therefore not forced by the data: a pressure exists that lowers the very loss joint training
+    minimises, and the shared output never found it. Earlier entries' "laminar physics recovers the pressure
+    downstream" is wrong: the laminar terms of the network's flow need about 7 mmHg.
+  - **The remaining gap to 13.1.** Over a whole beat the time-derivative term integrates to zero, so the beat-mean drop
+    is friction loss plus a small kinetic-energy difference between the planes: 0.85 laminar against the catheter's
+    3.68. The difference (about 2.8 mmHg on average, 5.7 at the peak) is the turbulent loss the eddy viscosity is for;
+    the rest is the scan's blur in time (60 ms frames) and space (1.8 mm voxels), which caps every MRI method here.
+- **The catheter's clock (prep v5).** The catheter's beat starts at the flow meter's upstroke (`beat_average`); the
+  scan's frames count from the MRI trigger. `catheter_clock_shift` matches the scan's upstream-plane flux per frame to
+  the meter's flow (smoothed over one acquisition window): catheter phase = scan time + shift, with shifts of -121 to
+  -147 ms and correlations 0.97-1.00 on all 8 cases (P2 baseline -147 ms; the physics fit above gave -118). Peak and
+  mean, the scores, do not depend on it; any comparison over the beat does. Stored as `cath_shift_s`; the problem
+  exposes the catheter on the scan clock as `cath_t`, `cath_dp_scan`.
+- **A separate pressure network (`problem.pressure_net`, the `coa_mri` default now).** The pressure no longer comes from
+  the velocity network's fourth output but from its own network: 12 time harmonics of the beat (exactly periodic),
+  isotropic Fourier features at sigma 1, 4 and 12 in space, 4 x 128 tanh, trained jointly with the velocity. It is the
+  design of the stand-alone fit above. Run configs without the key keep the shared output, so older checkpoints load as
+  trained. **Under test**: `scripts/coa_pressure_net_test.py` warm-starts the velocity from `coa_P2_baseline` with a
+  fresh pressure network. On the laptop GPU: peak drop 2.04 (random start) -> 0.34 mmHg at step 500 while the momentum
+  residual fell from 2.9e-2 to 1.6e-3; not decided yet. If the drop stays flat, a separate network is not enough and
+  the loss has to check the drop along the vessel (an integral form of the momentum balance).
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`docs/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
@@ -399,8 +434,9 @@ is not meaningful then (the JAX peak is).
 
 - Coarctation phantom: every network so far gives 0.06-0.39 mmHg against 13.1 on P2 baseline (laminar, eddy, RAD,
   heavier physics weights, a 10x weaker nu_t penalty). The momentum residual, not the pressure, carries the flow's
-  acceleration in systole ("Real data", 2026-10-23). The desktop queue is stopped until that is understood; the
-  remaining 15 phantom runs would take about 17 h with RAD.
+  acceleration in systole ("Real data", 2026-10-23). A pressure fitted alone to the same velocity gives 7.26 mmHg
+  (correlation 0.96 with the catheter's waveform), so the cause is the joint training. The separate pressure network is
+  under test; the desktop queue stays stopped until it passes (the remaining phantom runs take about 17 h).
 - Desktop stability: Windows restarted without a clean shutdown (Kernel-Power 41, no bugcheck) on 2026-10-20 (twice),
   10-21 and 10-22 (twice); four of the five during GPU training. Suspect the power supply or the GPU's 16-pin cable under
   load spikes. `nvidia-smi -pl 250` (the card's minimum, admin) would cap them. A restart kills the run in progress;

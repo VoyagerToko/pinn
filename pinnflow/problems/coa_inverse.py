@@ -18,14 +18,25 @@ coarctation jet happens far below the voxel size; its momentum exchange (how fas
 data) is what nu_t is inferred from, as the wake benchmark infers a viscosity. Without it, a laminar momentum balance at
 the molecular viscosity recovers almost all the jet's pressure downstream and the trans-coarctation drop vanishes.
 
+With ``problem.pressure_net`` the pressure comes from a second, separate network instead of the velocity network's fourth
+output: exactly periodic over the beat through explicit time harmonics, with isotropic multi-scale Fourier features in
+space (``PressureMLP``, ``_p_features``). Trained jointly with the velocity, it is what the momentum terms act on. The
+shared output did not learn the pressure: the first phantom networks left the flow's systolic acceleration in the
+momentum residual (0.3 mmHg), while a pressure fitted alone to the same frozen velocity gives 7.3 mmHg and a third less
+residual (scripts/coa_pressure_fit.py, STATUS.md 2026-10-23). Run configs without the key keep the shared output, so
+older checkpoints load as they were trained.
+
 The pressure is never measured by the scan. ``evaluate`` returns the section-averaged pressure difference between the
-upstream (AAo) and downstream (DAo) catheter planes over the beat, in mmHg, against the catheter.
+upstream (AAo) and downstream (DAo) catheter planes over the beat, in mmHg, against the catheter. The catheter's beat
+starts at the flow meter's upstroke, the scan's at the MRI trigger: ``cath_t`` is the catheter waveform on the scan's
+clock (prep v5 measures the offset; peak and mean, the scores, do not depend on it).
 """
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict
 
+import flax.linen as nn
 import jax
 import jax.numpy as jnp
 import ml_collections
@@ -38,6 +49,19 @@ from .base import Problem
 
 L_REF, U_REF = 0.01, 1.0  # m, m/s
 T_REF = L_REF / U_REF  # s
+
+
+class PressureMLP(nn.Module):
+    """The separate pressure network's trunk: tanh layers on the features of ``_p_features``, one output."""
+
+    width: int = 128
+    depth: int = 4
+
+    @nn.compact
+    def __call__(self, h):
+        for _ in range(self.depth):
+            h = jnp.tanh(nn.Dense(self.width)(h))
+        return nn.Dense(1)(h)[0]
 
 
 class CoarctationMRIInversePINN(Problem):
@@ -55,9 +79,11 @@ class CoarctationMRIInversePINN(Problem):
         self.rho, self.mu = float(d["rho"]), float(d["mu"])
         self.Re = self.rho * U_REF * L_REF / self.mu
         self.mmHg_per_unit = self.rho * U_REF**2 / 133.322
+        self.pressure_net = bool(p.get("pressure_net", False))  # absent in older run configs: the shared fourth output
         with config.unlocked():
             config.arch.periodicity = ml_collections.ConfigDict({"period": (2 * np.pi / self.T,), "axis": (0,), "trainable": (False,)})
-            config.arch.out_dim = 5 if bool(p.get("eddy_viscosity", False)) else 4
+            # the velocity network's outputs: (u, v, w[, p][, raw nu_t])
+            config.arch.out_dim = 3 + (0 if self.pressure_net else 1) + (1 if bool(p.get("eddy_viscosity", False)) else 0)
         super().__init__(config)
         if bool(p.get("eddy_viscosity", False)):
             self.init_weights["nu_t_reg"] = float(p.get("nu_t_reg_weight", 0.01))
@@ -84,10 +110,49 @@ class CoarctationMRIInversePINN(Problem):
         self.cath_phase = np.asarray(d["cath_phase_s"])
         self.cath_dp = np.asarray(d["cath_dp_mmHg"])
         self.cath_peak = float(d["cath_dp_peak_mmHg"])
+        # the catheter waveform on the scan's clock: catheter phase = (scan time + shift) mod period (0 before prep v5)
+        self.cath_shift = float(d.get("cath_shift_s", 0.0))
+        period = float(d["period_s"])
+        order = np.argsort((self.cath_phase - self.cath_shift) % period)
+        self.cath_t = ((self.cath_phase - self.cath_shift) % period)[order]
+        self.cath_dp_scan = self.cath_dp[order]
         self.data_pool = None  # voxel-frame indices drawn by data misfit (update_collocation); None: uniform
+        if self.pressure_net:
+            self.p_harmonics = int(p.get("pressure_net_harmonics", 12))
+            self.p_mlp = PressureMLP(width=int(p.get("pressure_net_width", 128)), depth=int(p.get("pressure_net_depth", 4)))
+            # isotropic space features: one length for all axes, so a feature's wavelength is the same in every direction
+            self.p_centre = jnp.asarray(0.5 * (pos.min(0) + pos.max(0)))
+            self.p_len = float(0.5 * (pos.max(0) - pos.min(0)).max())
+            sig = tuple(float(s) for s in p.get("pressure_net_sigmas", (1.0, 4.0, 12.0)))
+            self.p_B = jnp.concatenate([jax.random.normal(jax.random.PRNGKey(i), (3, 32)) * s for i, s in enumerate(sig)], 1)
+
+    # ------------------------------------------------------------------ the separate pressure network
+    def _p_features(self, z):
+        """(t, a, b, c) -> time harmonics of the beat (exactly periodic), the coordinates, and their Fourier features."""
+        k = jnp.arange(1, self.p_harmonics + 1)
+        wt = k * (2 * jnp.pi / self.T) * z[0]
+        x = (z[1:] - self.p_centre) / self.p_len
+        xb = x @ self.p_B
+        return jnp.concatenate([jnp.cos(wt), jnp.sin(wt), x, jnp.cos(xb), jnp.sin(xb)])
+
+    def init_params(self, key):
+        if not self.pressure_net:
+            return super().init_params(key)
+        k1, k2 = jax.random.split(key)
+        z0 = jnp.zeros(self.input_dim)
+        return {"vel": self.arch.init(k1, z0), "p": self.p_mlp.init(k2, self._p_features(z0))}
 
     # ------------------------------------------------------------------ network
     def net(self, params):
+        """(t, a, b, c) -> (u, v, w, p[, nu_t]) whichever networks carry them."""
+        if self.pressure_net:
+            def g(z):
+                raw = self.arch.apply(params["vel"], (z - self.in_shift) / self.in_scale)
+                p = self.p_mlp.apply(params["p"], self._p_features(z))[None]
+                if self.eddy:  # softplus keeps the eddy viscosity non-negative
+                    return jnp.concatenate([raw[:3], p, self.nu_t_scale * jax.nn.softplus(raw[3:4])])
+                return jnp.concatenate([raw[:3], p])
+            return g
         if self.eddy:  # (u, v, w, p, nu_t): softplus keeps the eddy viscosity non-negative
             def f(z):
                 raw = self.arch.apply(params, (z - self.in_shift) / self.in_scale)
@@ -251,6 +316,8 @@ class CoarctationMRIInversePINN(Problem):
             nut = self.predict(params, np.asarray(self.uniform_collocation(jax.random.PRNGKey(0), 8192)))[:, 4]
             extra = {"nu_t_mean_over_nu": float(nut.mean() * self.Re), "nu_t_p99_over_nu": float(np.percentile(nut, 99) * self.Re)}
         extra["data_prep_version"] = int(self.d.get("prep_version", 0))
+        extra["pressure_net"] = int(self.pressure_net)
+        extra["cath_shift_ms"] = 1e3 * self.cath_shift
         return {**extra,
             "dp_peak_pinn_mmHg": peak, "dp_peak_cath_mmHg": self.cath_peak,
             "dp_peak_err_pct": 100 * abs(peak - self.cath_peak) / self.cath_peak,
