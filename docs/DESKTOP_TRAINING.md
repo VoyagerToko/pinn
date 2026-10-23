@@ -29,10 +29,22 @@ pressure Poisson estimate, simplified Bernoulli, and both networks, with the slo
   - A "CHECK THE SEGMENTATION" line means the scan's flux through the upstream plane disagrees with the meter by
     more than 20% even after the automatic plane shift (see the docstring of `prepare_case`). Look at the QA image
     before trusting that case.
-- **The conventional pressure Poisson estimate is expected to come out far below the catheter.** Measured on P2
-  baseline: 0.7 mmHg against 13.1 mmHg. Laminar physics at 1.8 mm voxels recovers the jet's pressure downstream; the
-  catheter's drop is turbulent loss. The eddy-viscosity network exists to test whether that loss can be inferred.
-  Report what comes out, whichever way it goes.
+- **Findings so far (2026-10-23; details in STATUS.md, "Real data").**
+  - Since the sign fix (prep v4) the conventional pressure Poisson estimate reads slope 0.52 against the catheter,
+    near the published 0.63. The data is sound.
+  - `coa_P2_baseline` (laminar, prep v4): 0.30 against 13.1 mmHg. Its jet is there, 9% too slow, but its pressure
+    falls about 4 mmHg through the narrowing and recovers downstream: laminar physics has no term for the
+    turbulent loss the catheter measures. More laminar runs will not fix this; the eddy-viscosity network is the test.
+  - If an eddy run ends with `nu_t_mean_over_nu` near 0 again, rerun it with `--set problem.nu_t_reg_weight=0.001`.
+- **RAD for `coa_mri` needs this repository at or after the commit "Phantom: RAD of collocation points and data".**
+  - Before it, `--set training.rad_every=1000` was accepted but did nothing for this problem: no residual function,
+    so the resampling was skipped silently. A run started on older code is uniform sampling whatever its log says.
+    Check with `grep -n residual_magnitude_fn pinnflow/problems/coa_inverse.py`; empty output means no RAD.
+  - Now `coa_mri` defaults to RAD every 1000 steps with k=2, c=0. That redraws the collocation points by residual
+    and the scan's voxel-frames by misfit, which concentrates on the systolic jet (6% of the data uniformly, 18%
+    with RAD). No `--set` needed.
+  - To retrain a run already marked done on prep v4 (for example `coa_P2_baseline`) with RAD, move its
+    `runs/<name>` folder aside first; the driver skips runs whose `final_eval.json` is current.
 - **No L-BFGS for these benchmarks.** It overfits the scan's noise (STATUS.md, 2026-10-20).
 - **GPU memory:** `training.res_chunk` sets the peak; 16 GB is plenty at the defaults.
 - **Licence:** the phantom data is CC BY-NC 4.0 (Nair et al., Stanford Digital Repository, doi:10.25740/ms528wr9373).

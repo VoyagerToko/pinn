@@ -198,6 +198,7 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         p.p_scale = 3.0  # pressure in rho (1 m/s)^2 = 8.25 mmHg; the catheter drops are 7-25 mmHg
         p.eddy_viscosity = False  # True: learn nu_t(t, x) (5th output) for unresolved turbulent mixing in the jet
         p.nu_t_scale = 0.01
+        p.nu_t_reg_weight = 0.01  # fixed weight of the mean-nu_t penalty; lower it if nu_t collapses to 0
         c.arch.out_dim = 4
         c.arch.num_layers = 6
         c.arch.hidden_dim = 256
@@ -208,6 +209,14 @@ def _benchmark_defaults(c: ml_collections.ConfigDict, benchmark: str) -> None:
         t.res_batch_size = 4096
         t.bc_batch_size = 2048
         t.res_chunk = 1024
+        # RAD (handbook 5.5) every 1000 steps: collocation points by the physics residual, and the scan's voxel-frames by
+        # the data misfit (a jet the network leaves out has small residuals but a large misfit)
+        t.rad_every = 1000
+        t.rad_data = True
+        # k=2, c=0 (with rad_uniform_frac 0.2 still uniform): the systolic jet is 6% of the voxel-frames; k=1, c=1 raises
+        # its share of the data batch only to 7.4%, k=2, c=0 to 18% (measured on the P2_baseline network, 2026-10-23)
+        t.rad_k = 2.0
+        t.rad_c = 0.0
         w.init_weights = ml_collections.ConfigDict({"u_data": 1.0, "v_data": 1.0, "w_data": 1.0, "r_u": 1.0, "r_v": 1.0, "r_w": 1.0, "r_c": 1.0, "wall": 1.0, "p_anchor": 1.0})
         w.fixed_terms = ("p_anchor", "gauge", "nu_t_reg")
     elif benchmark == "deeponet_cavity":

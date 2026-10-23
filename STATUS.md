@@ -305,31 +305,57 @@ is not meaningful then (the JAX peak is).
   polynomial fitted to static tissue fixes it.
   - All 8 cases segment to 108-198 mL.
   - Every upstream plane carries 92-109% of the meter's flow.
-- **Scan-based baselines on all 8 cases** (`scripts/coa_report.py`, peak drop in mmHg):
+- **Velocity component signs (prep v4).** The export's stated encoding directions fix each component's axis but
+  not its sign. With the wrong signs the scan's own streamlines left the vessel within a few centimetres (the
+  viewer's pigment stuck at the release plane). `fix_component_signs` picks the signs with the smallest divergence of
+  the peak frame; all 8 cases chose row -1, column +1, slice -1. Every network trained on prep v3 data is invalid.
+- **Scan-based baselines on all 8 cases, prep v4** (`scripts/coa_report.py`, peak drop in mmHg):
 
   | case | catheter | pressure Poisson | Bernoulli 4 v^2 |
   |---|---|---|---|
-  | P1 baseline | 16.2 | 3.4 | 10.3 |
-  | P1 severe | 24.7 | 1.4 | 22.0 |
-  | P2 baseline | 13.1 | 0.9 | 8.0 |
-  | P2 severe | 20.8 | 0.3 | 16.7 |
-  | P1 baseline, low flow | 8.9 | 1.5 | 5.1 |
-  | P1 severe, low flow | 13.4 | 1.3 | 12.0 |
-  | P2 baseline, low flow | 7.2 | 0.6 | 3.9 |
-  | P2 severe, low flow | 12.0 | 1.0 | 7.4 |
+  | P1 baseline | 16.2 | 6.5 | 10.3 |
+  | P1 severe | 24.7 | 10.2 | 22.0 |
+  | P2 baseline | 13.1 | 7.9 | 8.0 |
+  | P2 severe | 20.8 | 14.5 | 16.7 |
+  | P1 baseline, low flow | 8.9 | 5.3 | 5.1 |
+  | P1 severe, low flow | 13.4 | 6.7 | 12.0 |
+  | P2 baseline, low flow | 7.2 | 4.9 | 3.9 |
+  | P2 severe, low flow | 12.0 | 5.5 | 7.4 |
 
-  - **Bernoulli:** slope 0.80, R^2 0.9, mean error 30%, always low. The 1.8 mm voxels blur the jet's core; the
+  - **Bernoulli:** slope 0.77, R^2 0.88, mean error 30%, always low. The 1.8 mm voxels blur the jet's core; the
     peak is taken through a 3x3x3 median at the 99.5th percentile, because a single noisy or aliased voxel had read
     4.0 m/s at a 2.75 m/s VENC.
-  - **Pressure Poisson:** slope 0.1 (provisional). Laminar momentum at the voxel scale recovers the jet's pressure
-    downstream; the catheter measures turbulent loss. The solver is exact on known gradients. The source publication
-    reports conventional 4D flow at slope 0.63; the gap is not explained yet.
+  - **Pressure Poisson:** slope 0.52, R^2 0.62, mean error 46%. Before the sign fix it read slope 0.1; the source
+    publication reports conventional 4D flow at slope 0.63, so the corrected data now reproduces the published
+    method. It takes the jet's measured decay at face value, losses included.
   - **The bar for the networks:** beat Bernoulli's 30%.
+- **First network on prep v4 data: `coa_P2_baseline` (laminar), 60k steps, no RAD.** 0.30 mmHg against 13.1
+  (97.7% error); velocity fit 35% over the whole beat. Diagnosis (2026-10-23, on its checkpoint):
+  - **The jet is there.** Relative error by region: whole beat 35%, diastole 58% (slow flow, noise-dominated),
+    systole 27%, systolic jet voxels 21%, scan > 1 m/s 19%. The network's jet is 9% slower than the scan (1.09
+    against 1.19 m/s); its single fastest voxel (2.6 m/s in the scan) reads 0.15 m/s.
+  - **The pressure drops and recovers.** At peak flow the network's pressure falls by about 4 mmHg through the
+    narrowing and recovers to 0.2 mmHg at the downstream plane. That is laminar flow at the fluid's own viscosity:
+    a smooth, nearly frictionless flow converts the jet's speed back into pressure. The catheter measures the
+    turbulent loss, which laminar physics has no term for. The 9% slow jet costs about 17% of the drop (pressure goes
+    with speed squared); the recovery costs the rest.
+  - **What follows.** The eddy-viscosity network is the test of the method (its only run, on prep v3 data, learned
+    nu_t ~ 0). If nu_t collapses again, lower `problem.nu_t_reg_weight` (0.01). The systolic jet is 6% of the
+    voxel-frames, so RAD is now on for `coa_mri` (next item).
+- **RAD for the phantom (2026-10-23).** It was off: `get_config` skips the ablation rows for the real-data benchmarks,
+  and the problem had no `residual_magnitude_fn`, so `--set training.rad_every=...` silently resampled nothing.
+  Now every 1000 steps the collocation points are redrawn by the momentum + continuity residual, and the scan's
+  voxel-frames by the network's misfit (`training.rad_data`), p ~ err^k / mean(err^k) + c. With the handbook's k=1,
+  c=1 the systolic jet's share of the data batch rises only from 6% to 7.4%; with k=2, c=0 (the `coa_mri` default
+  now; `rad_uniform_frac` keeps 20% uniform) to 18%. One update takes about 7 s on the laptop CPU. Not trained yet.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`docs/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
 
 ## Open issues
+
+- Coarctation phantom: the laminar network recovers the jet's pressure downstream (0.3 against 13.1 mmHg on P2
+  baseline). Next: the eddy-viscosity network on prep v4 data with RAD; then, if nu_t ~ 0 again, a weaker `nu_t_reg`.
 
 - Cavity: D1 above (rows C, D and the soft-lid F rerun are queued in this order).
 - Cylinder: start with `--windows 4 --steps 50000` to check the causal weights converge before the 16-window run.

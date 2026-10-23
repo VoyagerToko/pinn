@@ -84,6 +84,7 @@ class CoarctationMRIInversePINN(Problem):
         self.cath_phase = np.asarray(d["cath_phase_s"])
         self.cath_dp = np.asarray(d["cath_dp_mmHg"])
         self.cath_peak = float(d["cath_dp_peak_mmHg"])
+        self.data_pool = None  # voxel-frame indices drawn by data misfit (update_collocation); None: uniform
 
     # ------------------------------------------------------------------ network
     def net(self, params):
@@ -137,11 +138,49 @@ class CoarctationMRIInversePINN(Problem):
         t = jax.random.uniform(k3, (n, 1), minval=0.0, maxval=self.T)
         return jnp.concatenate([t, x], 1)
 
+    # ------------------------------------------------------------------ adaptive sampling (RAD, handbook 5.5)
+    def residual_magnitude_fn(self, params):
+        """|momentum residual| + |continuity residual| at one point: RAD of the collocation points."""
+        r = self.residual_fn(params)
+
+        def mag(z):
+            r_mom, r_c = r(z)
+            return jnp.sqrt(jnp.sum(r_mom**2) + r_c**2)
+
+        return mag
+
+    def update_collocation(self, key, params):
+        """RAD of the collocation points, and the same rule for the data (``training.rad_data``): the voxel-frames the
+        network fits worst are drawn more often.
+
+        The physics residual alone cannot find an under-fitted jet: a smooth flow that leaves the jet out satisfies the
+        equations everywhere (the first phantom runs: residuals ~1e-4, velocity off by 34 %, no pressure drop). The data
+        misfit does find it, so the data pool is resampled by it, p ~ err^k / mean(err^k) + c as for the residual."""
+        k1, k2, k3, k4 = jax.random.split(key, 4)
+        super().update_collocation(k1, params)
+        cfg = self.config.training
+        if not bool(cfg.get("rad_data", True)):
+            return
+        n_all = self.train_c.shape[0]
+        nc = min(int(cfg.get("rad_candidates", 100_000)), n_all)
+        cand = jax.random.choice(k2, n_all, (nc,), replace=False)
+        pred = self.predict(params, np.asarray(self.train_c[cand]))[:, :3]
+        err = jnp.linalg.norm(jnp.asarray(pred) - self.train_uvw[cand], axis=1)
+        k, c = float(cfg.get("rad_k", 1.0)), float(cfg.get("rad_c", 1.0))
+        p = err**k / (jnp.mean(err**k) + 1e-12) + c
+        n_pool = min(int(cfg.get("rad_pool_size", 65536)), nc)
+        n_adapt = int(round(n_pool * (1.0 - float(cfg.get("rad_uniform_frac", 0.2)))))
+        pick = cand[jax.random.choice(k3, nc, (n_adapt,), replace=False, p=p / p.sum())]
+        self.data_pool = jnp.concatenate([pick, jax.random.randint(k4, (n_pool - n_adapt,), 0, n_all)])
+
     def sample_batch(self, key):
         cfg = self.config.training
         ks = jax.random.split(key, 8)
         B, S = int(cfg.data_batch_size), self.n_sub
-        idx = jax.random.randint(ks[0], (B,), 0, self.train_c.shape[0])
+        if self.data_pool is None:
+            idx = jax.random.randint(ks[0], (B,), 0, self.train_c.shape[0])
+        else:  # the RAD data pool (update_collocation)
+            idx = self.data_pool[jax.random.randint(ks[0], (B,), 0, self.data_pool.shape[0])]
         c = self.train_c[idx]
         sub = jnp.repeat(c, S, axis=0)
         jit_x = (jax.random.uniform(ks[1], (B * S, 3)) - 0.5) * jnp.asarray(self.voxel)
