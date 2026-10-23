@@ -22,7 +22,6 @@ from viewer import theme
 from viewer.client import ROOT, Client
 
 CACHE = ROOT / "runs" / "_viewer_cache"
-NO_CURVE_CACHE = {"coa_p2b", "coa_p2b_eddy", "coa_p2s", "coa_p2s_eddy"}  # the comparison grows as phantom runs arrive
 
 
 def scene_colors(spec: S.SceneSpec) -> np.ndarray:
@@ -401,7 +400,7 @@ class AuxWorker(QThread):
                 if job[0] == "curve":
                     sid = job[1]
                     path = CACHE / f"{sid}__{self.runs.get(sid, 'run')}__curve.json"
-                    if sid in NO_CURVE_CACHE:
+                    if S.is_vessel(sid):  # the phantom comparison grows as runs arrive: never cached
                         data = client.curve(sid)
                     elif path.exists():
                         data = json.loads(path.read_text())
@@ -434,7 +433,7 @@ class Warmer(QThread):
 
     def run(self):
         client = Client(self.base)
-        order = [self.first] + [s.sid for s in S.SCENES if s.sid != self.first]
+        order = [self.first] + [s.sid for s in S.SCENES + S.PARTNERS if s.sid != self.first]
         for sid in order:
             if sid not in self.models:
                 continue
@@ -457,7 +456,7 @@ class Warmer(QThread):
         # then the rack's curves, the slowest first-time work (the forward cylinder takes ~2 min), into the disk cache
         for sid in order:
             spec = S.BY_ID.get(sid)
-            if sid not in self.models or spec is None or spec.chart in ("none", "centreline_live") or sid in NO_CURVE_CACHE:
+            if sid not in self.models or spec is None or spec.chart in ("none", "centreline_live") or S.is_vessel(sid):
                 continue
             path = CACHE / f"{sid}__{self.runs.get(sid, 'run')}__curve.json"
             if path.exists():

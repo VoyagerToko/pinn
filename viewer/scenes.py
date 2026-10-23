@@ -5,7 +5,7 @@ Live, per-frame numbers are computed separately and shown as such.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -36,12 +36,14 @@ class SceneSpec:
     evidence: Optional[str] = None  # the view that shows why a failure failed
     dims: int = 2
     start_at_end: bool = False  # open at the end of the time window (flows that start from rest)
-    tab: str = "bench"          # bench: the seven benchmarks | real: the real-world use case
+    tab: str = "bench"          # bench: the seven benchmarks | real: the real-world use case | phantom: the real MRI phantom
     trained: bool = True        # False until the scene's network exists (the server says so)
+    partner: Optional[str] = None  # a second network shown beside this one (the phantom's eddy-viscosity network)
+    rail_note: str = ""         # a middle line on the rail (the phantom's flow condition)
 
     @property
     def pigment(self) -> str:
-        return theme.PIGMENTS[theme.SCENE_PIGMENT[self.sid]]
+        return theme.PIGMENTS[theme.SCENE_PIGMENT.get(self.sid, "vermilion")]  # vermilion: blood, the real-data scenes
 
 
 SCENES: List[SceneSpec] = [
@@ -71,25 +73,22 @@ SCENES: List[SceneSpec] = [
               ["pigment", "mri", "speed", "pressure", "error"], 360, dye_rate=1.0, play_rate=3.0, coupled=True,
               emitter={"x": 0.55, "rows": 24, "per_step": 24}, chart="pressure_drop", evidence="pressure", tab="real"),
 ]
-# real data: a 3D aorta from 4D flow MRI; pigment is released at the upstream catheter plane (seeds from the server)
-SCENES.append(SceneSpec("coa_p2b", "Coarctation, P2 baseline, laminar", "P2 baseline, laminar", "not trained", "-",
-                        "peak pressure-drop error against the catheter; gate below 20 %",
-                        ["pigment", "mri", "speed", "pressure"], 8, dye_rate=1.0, play_rate=18.0, coupled=True,
-                        emitter={"seeds": True, "per_step": 48}, chart="coa_compare", evidence="pressure", dims=3, tab="real"))
-SCENES.append(SceneSpec("coa_p2b_eddy", "Coarctation, P2 baseline, eddy", "P2 baseline, eddy", "not trained", "-",
-                        "peak pressure-drop error against the catheter; gate below 20 %",
-                        ["pigment", "mri", "speed", "pressure"], 8, dye_rate=1.0, play_rate=18.0, coupled=True,
-                        emitter={"seeds": True, "per_step": 48}, chart="coa_compare", evidence="pressure", dims=3, tab="real"))
-SCENES.append(SceneSpec("coa_p2s", "Coarctation, P2 severe, laminar", "P2 severe, laminar", "not trained", "-",
-                        "peak pressure-drop error against the catheter; gate below 20 %",
-                        ["pigment", "mri", "speed", "pressure"], 8, dye_rate=1.0, play_rate=18.0, coupled=True,
-                        emitter={"seeds": True, "per_step": 48}, chart="coa_compare", evidence="pressure", dims=3, tab="real"))
-SCENES.append(SceneSpec("coa_p2s_eddy", "Coarctation, P2 severe, eddy", "P2 severe, eddy", "not trained", "-",
-                        "peak pressure-drop error against the catheter; gate below 20 %",
-                        ["pigment", "mri", "speed", "pressure"], 8, dye_rate=1.0, play_rate=18.0, coupled=True,
-                        emitter={"seeds": True, "per_step": 48}, chart="coa_compare", evidence="pressure", dims=3, tab="real"))
-BY_ID = {s.sid: s for s in SCENES}
-TABS = [("bench", "The seven benchmarks"), ("real", "Real-world use case")]
+# real data: a 3D-printed aorta in 4D flow MRI, all 8 phantom cases (2 patients x 2 coarctation grades x 2 flow rates).
+# Each case shows two networks side by side: laminar (this spec) and with a learned eddy viscosity (its partner).
+# Pigment is released at the upstream catheter plane (seeds from the server).
+for _p in ("P1", "P2"):
+    for _flow in ("", "_lowflow"):
+        for _grade in ("baseline", "severe"):
+            _case = f"{_p}_{_grade}{_flow}"
+            SCENES.append(SceneSpec(f"coa_{_case}", f"Coarctation, {_p} {_grade}, {'low' if _flow else 'normal'} flow", f"{_p} {_grade}",
+                                    "not trained", "-", "peak pressure-drop error against the catheter; gate below 20 %",
+                                    ["pigment", "mri", "speed", "pressure"], 8, dye_rate=1.0, play_rate=18.0, coupled=True,
+                                    emitter={"seeds": True, "per_step": 48}, chart="coa_compare", evidence="pressure", dims=3,
+                                    tab="phantom", partner=f"coa_{_case}_eddy", rail_note="low flow" if _flow else "normal flow"))
+# the partners: not on the rail, driven beside their scene
+PARTNERS: List[SceneSpec] = [replace(s, sid=s.partner, partner=None, tab="") for s in SCENES if s.partner]
+BY_ID = {s.sid: s for s in SCENES + PARTNERS}
+TABS = [("bench", "The seven benchmarks"), ("real", "Real-world use case"), ("phantom", "Real MRI phantom")]
 
 
 def is_vessel(sid: str) -> bool:
@@ -99,7 +98,6 @@ def is_vessel(sid: str) -> bool:
 
 def scenes_in(tab: str) -> List[SceneSpec]:
     return [s for s in SCENES if s.tab == tab]
-BY_ID = {s.sid: s for s in SCENES}
 
 
 def band_pigments(spec: SceneSpec) -> List[str]:

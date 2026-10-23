@@ -38,6 +38,7 @@ class Tank3D(QWidget):
         self.cloud_actor = None
         self.orbit = True
         self.L = 2 * np.pi
+        self.label_actor = None
         self.configure_box()
 
     # ---- modes ---------------------------------------------------------------------------------------
@@ -145,6 +146,15 @@ class Tank3D(QWidget):
             self.tubes_actor = None
         if tubes.n_points:
             self.tubes_actor = self.plotter.add_mesh(tubes, color=theme.PIGMENTS["cobalt violet"], opacity=0.28, smooth_shading=True, specular=0.2, show_scalar_bar=False, reset_camera=False)
+        self.plotter.render()
+
+    def set_label(self, text: str):
+        """A caption in the tank's top-left corner (which network this tank shows); empty removes it."""
+        if self.label_actor is not None:
+            self.plotter.remove_actor(self.label_actor, render=False)
+            self.label_actor = None
+        if text:
+            self.label_actor = self.plotter.add_text(text, position="upper_left", font_size=10, color=theme.INK)
         self.plotter.render()
 
     def grab_image(self):

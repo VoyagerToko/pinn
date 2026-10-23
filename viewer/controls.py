@@ -165,7 +165,7 @@ class SceneRail(KeyboardFocus, QWidget):
         self.update()
 
     def _cells(self) -> List[QRectF]:
-        w = self.width() / 7  # one width for every tab, so a drop never moves when the tab changes
+        w = self.width() / max(7, len(self.scenes))  # one width for every tab of up to 7, so a drop never moves when the tab changes
         return [QRectF(i * w, 0, w, self.height()) for i in range(len(self.scenes))]
 
     def mouseMoveEvent(self, e):
@@ -224,11 +224,16 @@ class SceneRail(KeyboardFocus, QWidget):
             x = r.left() + 54
             p.setFont(theme.font("text", 14, 650 if on else 500))
             p.setPen(theme.qcolor(theme.INK if on else theme.INK_SOFT))
-            p.drawText(QRectF(x, r.top() + 11, r.width() - 60, 20), Qt.AlignLeft | Qt.AlignVCenter, s.short)
+            y = r.top() + (4 if s.rail_note else 11)
+            p.drawText(QRectF(x, y, r.width() - 60, 20), Qt.AlignLeft | Qt.AlignVCenter, s.short)
+            if s.rail_note:
+                y += 19
+                p.setFont(theme.font("text", theme.SMALL, 400))
+                p.drawText(QRectF(x, y, r.width() - 60, 18), Qt.AlignLeft | Qt.AlignVCenter, s.rail_note)
             p.setFont(theme.font("text", theme.SMALL, 500))
             word = s.verdict if state in ("ready", "waiting") or on else ("compiling" if state == "warming" else state)
             p.setPen(theme.qcolor(theme.INK_SOFT if s.verdict != "failed" else theme.MADDER_TEXT))
-            p.drawText(QRectF(x, r.top() + 32, r.width() - 60, 18), Qt.AlignLeft | Qt.AlignVCenter, word)
+            p.drawText(QRectF(x, y + (17 if s.rail_note else 21), r.width() - 60, 18), Qt.AlignLeft | Qt.AlignVCenter, word)
             p.setOpacity(1.0)
         if self.note and cells and self.width() - cells[-1].right() > 280:  # only where there is room for it
             p.setFont(theme.font("text", 14, 400))

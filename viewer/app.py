@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from typing import Dict, Optional
@@ -31,11 +32,12 @@ CAPTIONS = {
     "stenosis": "No scan measures pressure. The network infers it from the voxel velocities and the equations of motion. The dashed line is the simplified Bernoulli rule used in clinics today, applied to the same scan.",
 }
 CAPTIONS["stenosis_fast"] = CAPTIONS["stenosis"]
-_COA_CAPTION = ("Real scanner data, real catheter. The bars are every phantom case: the catheter's peak pressure drop next to "
-                   "the conventional 4D-flow estimate, the clinical Bernoulli rule, and the two networks, all from the same scan.")
-for _sid in ['coa_p2b', 'coa_p2b_eddy', 'coa_p2s', 'coa_p2s_eddy']:
-    CAPTIONS[_sid] = _COA_CAPTION + (" This network uses laminar physics at the fluid's own viscosity." if not _sid.endswith("_eddy") else
-                                     " This network may add a learned eddy viscosity where the jet spreads and decays: the turbulent loss laminar physics lacks.")
+_COA_CAPTION = ("Real scanner data, real catheter. Left tank: the laminar network, physics at the fluid's own viscosity. Right tank: "
+                "the network that may add a learned eddy viscosity where the jet spreads and decays. The bars are every phantom case: the "
+                "catheter's peak pressure drop next to the conventional 4D-flow estimate, the clinical Bernoulli rule and both networks.")
+_COA_SIDS = [s.sid for s in S.SCENES if s.partner]
+for _sid in _COA_SIDS:
+    CAPTIONS[_sid] = _COA_CAPTION
 CAPTION_UNTRAINED = {
     "coa": "The networks are not trained yet (they train on the desktop and arrive here by themselves). The tank shows the scan's "
            "measured speed in the real phantom; the bars compare the catheter with the conventional estimates.",
@@ -54,10 +56,6 @@ SHEET = {
     "deeponet": ("Reference: finite differences", ""),
     "stenosis": ("Reference: CFD of the same vessel", "same instant, same colour scale"),
     "stenosis_fast": ("Reference: CFD of the same vessel", "same instant, same colour scale"),
-    "coa_p2b": ("Reference: catheter pressure", ""),
-    "coa_p2b_eddy": ("Reference: catheter pressure", ""),
-    "coa_p2s": ("Reference: catheter pressure", ""),
-    "coa_p2s_eddy": ("Reference: catheter pressure", ""),
 }
 EMPTY = {
     "coa": "The reference is a catheter: pressure measured upstream and downstream of the coarctation during the scan session, averaged over 30+ beats. The chart compares every method with it.",
@@ -66,7 +64,8 @@ EMPTY = {
 }
 
 
-for _sid in ['coa_p2b', 'coa_p2b_eddy', 'coa_p2s', 'coa_p2s_eddy']:
+for _sid in _COA_SIDS:
+    SHEET[_sid] = ("Reference: catheter pressure", "")
     EMPTY[_sid] = EMPTY["coa"]
     CAPTION_UNTRAINED[_sid] = CAPTION_UNTRAINED["coa"]
 
@@ -118,7 +117,7 @@ class MainWindow(QMainWindow):
         self.stage = QStackedWidget()
         self.bath = Bath2D()
         self.stage.addWidget(self.bath)
-        self.tank = None
+        self.tank = self.tank2 = self.tanks = None  # 3D: one tank, or two side by side (the phantom's two networks)
         self.panel = BathPanel(self.stamp, self.stage)
         self.title, self.summary, self.mode_line = self.panel.head.title, self.panel.head.summary, self.panel.mode_line
         self.rack = Rack()
@@ -139,7 +138,7 @@ class MainWindow(QMainWindow):
         self.live.setFont(theme.font("text", theme.SMALL, 400, tabular=True))
         self.live.setStyleSheet(f"color: {theme.HAIR};")
         self.live.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.hint = QLabel("click drops pigment, drag combs it, space plays, 1 to 7 pick a scene")
+        self.hint = QLabel("click drops pigment, drag combs it, space plays, 1 to 8 pick a scene")
         self.hint.setFont(theme.font("text", theme.SMALL, 400))
         self.hint.setStyleSheet(f"color: {theme.INK_SOFT};")
         self.hint.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
@@ -172,6 +171,8 @@ class MainWindow(QMainWindow):
         self.drop_i = 0
         self._cursor_at = 0.0
         self.engine = self.fieldw = self.aux = self.warmer = None
+        self.engine2 = self.fieldw2 = None  # the partner network (eddy viscosity) beside a phantom scene
+        self.partner: Optional[S.SceneSpec] = None
         self._retry = 0
 
         self.rail.chosen.connect(self.select_scene)
@@ -186,7 +187,7 @@ class MainWindow(QMainWindow):
         for key, fn in (("Space", self.toggle_play), ("R", self.reset_dye), ("V", self.next_view), ("F", self.toggle_full), ("Escape", self.leave_full),
                         ("S", self.start_server), ("D", self.drop_random), ("T", self.toggle_tab)):
             QShortcut(QKeySequence(key), self, activated=fn)
-        for i in range(7):  # 1 to 7 pick a scene within the current tab
+        for i in range(8):  # 1 to 8 pick a scene within the current tab
             QShortcut(QKeySequence(str(i + 1)), self, activated=lambda i=i: self.select_index(i))
 
         self.bath.state = "connecting"
@@ -238,6 +239,12 @@ class MainWindow(QMainWindow):
         self.fieldw.ready.connect(self.on_field)
         self.fieldw.status.connect(self.on_status)
         self.fieldw.start()
+        self.engine2 = ParticleEngine(url)
+        self.engine2.stepped.connect(self.on_step)
+        self.engine2.start()
+        self.fieldw2 = FieldWorker(url)
+        self.fieldw2.ready.connect(self.on_field)
+        self.fieldw2.start()
         self.aux = AuxWorker(url, {sid: _cache_key(m) for sid, m in self.models.items()})
         self.aux.curve.connect(self.on_curve)
         self.aux.points.connect(self.on_points)
@@ -259,6 +266,10 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ scenes
     def select_scene(self, sid: str):
+        if os.environ.get("PINN_VIEWER_DEBUG"):
+            import traceback
+
+            print(f"[viewer] select_scene({sid})", "".join(traceback.format_stack(limit=4)[:-1]), flush=True)
         if sid not in self.models or self.engine is None:
             return
         spec = S.BY_ID[sid]
@@ -266,19 +277,24 @@ class MainWindow(QMainWindow):
         if spec.tab != self.tab:
             self.set_tab(spec.tab, select=False)
         self.spec = spec
+        self.partner = S.BY_ID.get(spec.partner) if spec.partner and spec.partner in self.models else None
+        trained = self._trained()
         ctl = m.get("controls", {})
         domain = [float(v) for v in m["domain"]]
         self.rail.set_active(sid)
         self.title.setText(spec.name)
         self.summary.setText(m.get("summary", ""))
-        source = "measured, STATUS.md" if spec.tab == "bench" else ("measured, final_eval.json" if spec.trained else "awaiting training")
-        self.stamp.set(spec.verdict, spec.headline, spec.headline_label, spec.pigment, source)
+        source = "measured, STATUS.md" if spec.tab == "bench" else ("measured, final_eval.json" if trained else "awaiting training")
+        if self.partner is not None:
+            self.stamp.set(*_pair_stamp(spec, self.partner), spec.pigment, source)
+        else:
+            self.stamp.set(spec.verdict, spec.headline, spec.headline_label, spec.pigment, source)
         self.panel.set_live("")
-        views = spec.views if spec.trained else ["mri"]
+        views = self._views()
         self.view = views[0]
-        self.chips.configure(views, self.view, spec.pigment, spec.evidence if spec.trained else None)
+        self.chips.configure(views, self.view, spec.pigment, spec.evidence if trained else None)
         self.set_playing(False)
-        self.play.setVisible(spec.play_rate > 0 and spec.trained)
+        self.play.setVisible(spec.play_rate > 0 and trained)
         if "t" in ctl:
             t0, t1 = ctl["t"]
             self.t = float(t1) if spec.start_at_end else float(t0)
@@ -305,18 +321,20 @@ class MainWindow(QMainWindow):
             self.Re = 1000.0
         if spec.dims == 3:
             if self.tank is None:
-                from viewer.tank import Tank3D
-
-                self.tank = Tank3D()
-                self.stage.addWidget(self.tank)
-            self.stage.setCurrentWidget(self.tank)
+                self._make_tanks()
+            self.stage.setCurrentWidget(self.tanks)
+            self.tank2.setVisible(self.partner is not None)
             if S.is_vessel(sid):
-                self.body.set_aspect(0.95)  # an upright aorta
+                self.body.set_aspect(1.75 if self.partner is not None else 0.95)  # upright aortas, two side by side
+                self.tank.set_label(f"laminar{'' if spec.trained else ': not trained yet, the scan'}")
+                if self.partner is not None:
+                    self.tank2.set_label(f"eddy viscosity{'' if self.partner.trained else ': not trained yet, the scan'}")
                 if sid in self.geom:
-                    self.tank.configure_vessel(self.geom[sid])
+                    self._configure_vessels(self.geom[sid])
                 else:
                     self.aux.want_points(sid)
             else:
+                self.tank.set_label("")
                 self.tank.configure_box()
                 self.body.set_aspect(1.15)  # the tank's view of the cube
         else:
@@ -341,10 +359,11 @@ class MainWindow(QMainWindow):
             r = self.bath.domain_rect()
             self.engine.set_raster_size(max(8, int(r.width() * self.devicePixelRatioF() / 2)), max(8, int(r.height() * self.devicePixelRatioF() / 2)))
             self.bath.update()
-        if spec.trained:
-            self.engine.set_scene(spec, domain, self.t, self.Re, ctl.get("t"))
-        else:
-            self.engine.set_idle()  # no network to carry the pigment yet
+        for eng, sp in ((self.engine, spec), (self.engine2, self.partner)):
+            if sp is not None and sp.trained:
+                eng.set_scene(sp, domain, self.t, self.Re, ctl.get("t"))
+            else:
+                eng.set_idle()  # no network to carry the pigment yet
         self.request_field()
         title, note = SHEET[sid]
         self.rack.sheet.title, self.rack.sheet.note = title, note
@@ -354,7 +373,7 @@ class MainWindow(QMainWindow):
         self.rack.sheet.empty = EMPTY.get(sid, "Waiting for the first frame")
         self.rack.set_compact(sid in EMPTY)  # no reference field: a short note, the chart takes the room
         self.rack.sheet.update()
-        self.rack.caption.setText(CAPTIONS.get(sid, "") if spec.trained else CAPTION_UNTRAINED.get(sid, ""))
+        self.rack.caption.setText(CAPTIONS.get(sid, "") if trained else CAPTION_UNTRAINED.get(sid, ""))
         self.rack.chart.clear("Loading the evidence for this scene")
         self.rack.show_coefficients(False)
         if spec.chart in ("centreline_live",):
@@ -365,6 +384,39 @@ class MainWindow(QMainWindow):
         if sid == "inverse" and sid not in self.points:
             self.aux.want_points(sid)
         self.update_mode_line()
+
+    def _make_tanks(self):
+        from viewer.tank import Tank3D
+
+        self.tanks = QWidget()
+        row = QHBoxLayout(self.tanks)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        self.tank, self.tank2 = Tank3D(), Tank3D()
+        row.addWidget(self.tank, 1)
+        row.addWidget(self.tank2, 1)
+        self.stage.addWidget(self.tanks)
+        # one camera for both: turning one aorta turns the other
+        self.tank2.plotter.renderer.camera = self.tank.plotter.renderer.camera
+        for a, b in ((self.tank, self.tank2), (self.tank2, self.tank)):
+            a.plotter.iren.add_observer("InteractionEvent", lambda *_, b=b: b.plotter.render())
+
+    def _configure_vessels(self, geom):
+        self.tank.configure_vessel(geom)
+        if self.partner is not None:
+            self.tank2.configure_vessel(geom)
+            self.tank2.plotter.renderer.camera = self.tank.plotter.renderer.camera
+            self.tank.plotter.reset_camera()
+            self.tank2.plotter.render()
+
+    def _trained(self, spec=None) -> bool:
+        """A scene shows its network's views when it, or the partner beside it, is trained."""
+        if spec is None:
+            spec = self.spec
+        if spec is None:
+            return False
+        partner = self.partner if spec is self.spec else None
+        return spec.trained or (partner is not None and partner.trained)
 
     def set_tab(self, tab: str, select: bool = True):
         self.tab = tab
@@ -378,7 +430,8 @@ class MainWindow(QMainWindow):
                 self.select_scene(first)
 
     def toggle_tab(self):
-        self.set_tab("real" if self.tab == "bench" else "bench")
+        keys = [k for k, _ in S.TABS]
+        self.set_tab(keys[(keys.index(self.tab) + 1) % len(keys)])
 
     def select_index(self, i: int):
         scenes = S.scenes_in(self.tab)
@@ -388,6 +441,8 @@ class MainWindow(QMainWindow):
     def request_field(self):
         if self.spec and self.fieldw:
             self.fieldw.request(self.spec.sid, self.t, self.Re, self.spec.field_n)
+            if self.partner is not None:
+                self.fieldw2.request(self.partner.sid, self.t, self.Re, self.partner.field_n)
 
     def update_mode_line(self):
         s = self.spec
@@ -395,7 +450,7 @@ class MainWindow(QMainWindow):
             return
         k, unit = self.timebar.scale, (" " + self.timebar.unit) if self.timebar.unit else ""
         tt = f"{self.t * k:.2f}{unit}"
-        if not s.trained:
+        if not self._trained():
             txt = f"The scan at t = {tt}; drag the time bar through the beat."
         elif s.play_rate == 0:
             txt = f"Steady flow, Re {self.Re:.0f}: each update asks the network for every particle's velocity."
@@ -409,13 +464,13 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ controls
     def _views(self):
         """The views this scene can show now: an untrained scene has only its scan."""
-        return self.spec.views if self.spec.trained else ["mri"]
+        return self.spec.views if self._trained() else ["mri"]
 
     def set_view(self, view: str):
         if self.spec is None or view not in self._views():
             return
         self.view = view
-        self.chips.configure(self._views(), view, self.spec.pigment, self.spec.evidence if self.spec.trained else None)
+        self.chips.configure(self._views(), view, self.spec.pigment, self.spec.evidence if self._trained() else None)
         self.render_field()
 
     def next_view(self):
@@ -424,12 +479,13 @@ class MainWindow(QMainWindow):
             self.set_view(v[(v.index(self.view) + 1) % len(v)] if self.view in v else v[0])
 
     def set_playing(self, on: bool):
-        if self.spec is None or self.spec.play_rate == 0 or not self.spec.trained:
+        if self.spec is None or self.spec.play_rate == 0 or not self._trained():
             on = False
         self.playing = on
         self.play.set_playing(on)
         if self.engine:
             self.engine.set_playing(on)
+            self.engine2.set_playing(on)
         self.update_mode_line()
 
     def toggle_play(self):
@@ -440,6 +496,7 @@ class MainWindow(QMainWindow):
         self.timebar.set_t(t, animate=True)
         if self.engine:
             self.engine.set_time(t)
+            self.engine2.set_time(t)
         self.request_field()
         self.rack.chart.move_cursor(t)
         self.update_mode_line()
@@ -465,6 +522,7 @@ class MainWindow(QMainWindow):
     def reset_dye(self):
         if self.engine:
             self.engine.reset()
+            self.engine2.reset()
 
     def on_drop(self, pts):
         if self.engine:
@@ -507,8 +565,17 @@ class MainWindow(QMainWindow):
         self.rail.update()
 
     def on_step(self, pl: Dict):
-        if self.spec is None or pl["sid"] != self.spec.sid:
+        if self.spec is None:
             return
+        if self.partner is not None and pl["sid"] == self.partner.sid:
+            if self.tank2 is not None:
+                self.tank2.update_particles(pl["hist"], pl["active"], pl["pig"], pl["colors"], pl["playing"])
+            if self.spec.trained:
+                return  # the laminar network keeps the clock
+        elif pl["sid"] != self.spec.sid:
+            return
+        elif self.partner is not None and self.playing and self.partner.trained:
+            self.engine2.set_time(pl["t"])  # the two networks advance on one clock
         if self.spec.dims == 2:
             img = pl.get("image")
             if img is not None:
@@ -517,7 +584,7 @@ class MainWindow(QMainWindow):
                 self.bath.state = "live"
                 self.bath.state_text = ""
             self.bath.update()
-        elif self.tank is not None:
+        elif self.tank is not None and pl["sid"] == self.spec.sid:
             self.tank.update_particles(pl["hist"], pl["active"], pl["pig"], pl["colors"], pl["playing"])
         if self.playing:
             self.t = pl["t"]
@@ -534,7 +601,7 @@ class MainWindow(QMainWindow):
         self.live.setText(f"live on the {dev}   {pl['hz']:.0f} updates/s   velocity {pl['vel_ms']:.0f} ms   field {self.field_ms:.0f} ms")
 
     def on_field(self, res: Dict):
-        if self.spec is None or res["sid"] != self.spec.sid:
+        if self.spec is None or res["sid"] not in (self.spec.sid, self.partner.sid if self.partner else None):
             return
         self.field_ms = res["ms"]
         self.last_field[res["sid"]] = res
@@ -543,15 +610,16 @@ class MainWindow(QMainWindow):
     def render_field(self):
         if self.spec is None:
             return
+        if S.is_vessel(self.spec.sid):
+            if self.tank is not None:
+                self._render_vessels(self.view)
+            return
         res = self.last_field.get(self.spec.sid)
         if res is None:
             return
         f, hdr, sid, view = res["fields"], res["hdr"], self.spec.sid, self.view
         if self.spec.dims == 3:
             if self.tank is None:
-                return
-            if S.is_vessel(sid):
-                self._render_vessel(f, view)
                 return
             self.tank.update_field(f, int(hdr["shape"][0]))
             return
@@ -614,16 +682,25 @@ class MainWindow(QMainWindow):
         else:
             self.panel.set_live("")
 
-    def _render_vessel(self, f, view):
-        """Colour the phantom's lumen voxels by the view, on scales fixed for the scene."""
-        if self.tank.cloud is None:
-            return
+    def _render_vessels(self, view):
+        """Both tanks on one scale: the laminar network left, the eddy-viscosity network right."""
+        live = ""
+        for tank, sp in ((self.tank, self.spec), (self.tank2, self.partner)):
+            res = self.last_field.get(sp.sid) if sp is not None else None
+            if res is not None:
+                # a network not trained yet shows its scan in every view (its tank's label says so)
+                live = self._render_vessel(tank, res["fields"], view if sp.trained else "mri") or live
+        self.panel.set_live(live)
+
+    def _render_vessel(self, tank, f, view) -> str:
+        """Colour the phantom's lumen voxels by the view, on scales fixed for the scene; returns the legend line."""
+        if tank.cloud is None:
+            return ""
         key = {"mri": "speed_mri", "speed": "speed_net", "pressure": "p_net"}.get(view)
         vals = f.get(key) if key else None
         if vals is None:
-            self.tank.update_cloud(None)
-            self.panel.set_live("")
-            return
+            tank.update_cloud(None)
+            return ""
         sid = self.spec.sid
         if (sid, view) not in self.scales:
             if view == "pressure":
@@ -634,10 +711,10 @@ class MainWindow(QMainWindow):
                 self.scales[(sid, view)] = (0.0, float(np.nanpercentile(ref, 99.5)) * 1.2 or 1.0)
         lo, hi = self.scales[(sid, view)]
         lut = theme.MAPS["diverging" if view == "pressure" else "sequential"]
-        self.tank.update_cloud(vals, lut, lo, hi, alpha=0.55 if view != "mri" else 0.8)
+        tank.update_cloud(vals, lut, lo, hi, alpha=0.55 if view != "mri" else 0.8)
         label = {"mri": "scan speed", "speed": "network speed", "pressure": "network pressure"}[view]
         rng = f"+-{hi:.2g} mmHg" if view == "pressure" else f"0 to {hi:.2g} m/s"
-        self.panel.set_live(f"colour: {label}, {rng}")
+        return f"colour: {label}, {rng}, one scale for both tanks" if self.partner is not None else f"colour: {label}, {rng}"
 
     def update_sensors(self):
         pts = self.points.get("inverse")
@@ -656,7 +733,7 @@ class MainWindow(QMainWindow):
         if data and S.is_vessel(sid):
             self.geom[sid] = data
             if self.spec is not None and self.spec.sid == sid and self.tank is not None:
-                self.tank.configure_vessel(data)
+                self._configure_vessels(data)
                 self.render_field()
             return
         if data:
@@ -700,17 +777,19 @@ class MainWindow(QMainWindow):
     def take_shot(self):
         img = self.grab().toImage()
         if self.spec is not None and self.spec.dims == 3 and self.tank is not None:
+            from PySide6.QtCore import QRectF
             from PySide6.QtGui import QImage, QPainter
 
-            arr = np.ascontiguousarray(self.tank.grab_image()[..., :3])
-            h, w = arr.shape[:2]
-            q = QImage(arr.data, w, h, 3 * w, QImage.Format_RGB888).copy()
-            pos = self.tank.plotter.interactor.mapTo(self, self.tank.plotter.interactor.rect().topLeft())
-            from PySide6.QtCore import QRectF
-
             p = QPainter(img)
-            ia = self.tank.plotter.interactor
-            p.drawImage(QRectF(pos.x(), pos.y(), ia.width(), ia.height()), q)
+            for tank in (self.tank, self.tank2):
+                if not tank.isVisible():
+                    continue
+                arr = np.ascontiguousarray(tank.grab_image()[..., :3])
+                h, w = arr.shape[:2]
+                q = QImage(arr.data, w, h, 3 * w, QImage.Format_RGB888).copy()
+                ia = tank.plotter.interactor
+                pos = ia.mapTo(self, ia.rect().topLeft())
+                p.drawImage(QRectF(pos.x(), pos.y(), ia.width(), ia.height()), q)
             p.end()
         img.save(self.args.shot)
         print("screenshot ->", self.args.shot, flush=True)
@@ -718,14 +797,15 @@ class MainWindow(QMainWindow):
             self.close()
 
     def closeEvent(self, e):
-        for w in (self.engine, self.fieldw, self.aux):
+        for w in (self.engine, self.engine2, self.fieldw, self.fieldw2, self.aux):
             if w is not None:
                 w.stop()
-        for w in (self.engine, self.fieldw, self.aux, self.warmer):
+        for w in (self.engine, self.engine2, self.fieldw, self.fieldw2, self.aux, self.warmer):
             if w is not None:
                 w.wait(3000)
-        if self.tank is not None:
-            self.tank.close_plotter()
+        for tank in (self.tank, self.tank2):
+            if tank is not None:
+                tank.close_plotter()
         super().closeEvent(e)
 
 
@@ -737,7 +817,7 @@ def _cache_key(m) -> str:
 
 def _apply_server_verdict(spec, m) -> None:
     """The real-world scene's verdict comes from its evaluation (final_eval.json), read by the server."""
-    if spec is None or spec.tab != "real":
+    if spec is None or spec.tab == "bench":
         return
     spec.trained = bool(m.get("trained", True))
     fe = (m.get("metrics") or {}).get("final_eval") or {}
@@ -755,6 +835,17 @@ def _apply_server_verdict(spec, m) -> None:
     else:
         spec.verdict, spec.headline = "not trained", "-"
         spec.headline_label = "trains on the desktop and arrives here by itself (docs/DESKTOP_TRAINING.md)"
+
+
+def _pair_stamp(a, b):
+    """The stamp for a phantom case: both networks' peak pressure-drop errors against the catheter (word, number, label)."""
+    errs = [s.headline.split()[0] if s.trained and s.headline not in ("-", "") else "-" for s in (a, b)]
+    if all(e == "-" for e in errs):
+        word = "not trained" if not (a.trained or b.trained) else "trained"
+        return word, "-", "peak pressure-drop error, laminar and eddy viscosity, against the catheter; gate below 20 %"
+    vals = [float(e) for e in errs if e != "-"]
+    word = "passed" if min(vals) < 20.0 else "gate missed"
+    return word, f"{errs[0]} | {errs[1]} %", "peak pressure-drop error against the catheter, laminar | eddy viscosity; gate below 20 %"
 
 
 def _legend_label(view: str, sid: str) -> str:
