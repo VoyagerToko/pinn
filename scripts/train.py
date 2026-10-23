@@ -57,7 +57,7 @@ def main():
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--init", default=None, help="warm-start the network from this checkpoint (same architecture)")
     ap.add_argument("--wandb", action="store_true")
-    ap.add_argument("--set", nargs="*", default=[], help="config overrides key=value")
+    ap.add_argument("--set", nargs="*", action="extend", default=[], help="config overrides key=value (repeated --set options accumulate)")
     args = ap.parse_args()
 
     cfg = get_config(args.benchmark, args.ablation, parse_overrides(args.set))

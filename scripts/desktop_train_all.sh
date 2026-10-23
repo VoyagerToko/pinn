@@ -15,6 +15,11 @@ for c in "$HOME/miniforge3/bin/activate" "$HOME/miniconda3/bin/activate" "$HOME/
   [ -f "$c" ] && source "$c" pinn && break
 done
 export XLA_PYTHON_CLIENT_PREALLOCATE=false
+# Python downloads (remote_zip.py) verify TLS against the conda env's CA bundle, which lacks the root of
+# stacks.stanford.edu's chain (emSign Root CA - G1); the system store has it. Use the system store when present.
+if [ -z "${SSL_CERT_FILE:-}" ] && [ -f /etc/ssl/certs/ca-certificates.crt ]; then
+  export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+fi
 export XLA_FLAGS="${XLA_FLAGS:---xla_gpu_autotune_level=2}"
 mkdir -p runs
 exec > >(tee -a runs/desktop_train_all.log) 2>&1
@@ -80,12 +85,10 @@ for c in P2_baseline P2_severe; do
   run "coa_${c}" --benchmark coa_mri --set "problem.case='$c'"
   run "coa_${c}_eddy" --benchmark coa_mri --set "problem.case='$c'" problem.eddy_viscosity=True
 done
-# 3. the other six cases: the eddy-viscosity network first, then the laminar one
-for c in P1_baseline P1_severe P2_baseline_lowflow P2_severe_lowflow P1_baseline_lowflow P1_severe_lowflow; do
-  run "coa_${c}_eddy" --benchmark coa_mri --set "problem.case='$c'" problem.eddy_viscosity=True
-done
+# 3. the other six cases, each as a pair: the laminar network, then the eddy-viscosity one (every finished case has both)
 for c in P1_baseline P1_severe P2_baseline_lowflow P2_severe_lowflow P1_baseline_lowflow P1_severe_lowflow; do
   run "coa_${c}" --benchmark coa_mri --set "problem.case='$c'"
+  run "coa_${c}_eddy" --benchmark coa_mri --set "problem.case='$c'" problem.eddy_viscosity=True
 done
 say "all runs finished"
 [ "${SMOKE:-0}" = "1" ] || cat runs/coa_report/report.md

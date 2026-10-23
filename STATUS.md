@@ -19,6 +19,8 @@ kept under their own names; nothing is deleted.
 | D Taylor-Green 3D (SPINN) | dissipation peak within 5% of the reference (0.01282 at t=9.0, digitised) | tgv3d_H (80k steps, reduced) | peak of -dE/dt 0.0292 at t=0 (127%); 2 nu zeta max 4.9e-4 (96%); no transition | **failed** (D7) |
 | inverse wake | lambda_1, lambda_2 recovered; hidden pressure | cylinder_inverse (25k + 1k, reduced) | lambda_1 = 0.99997 (0.004%), lambda_2 = 0.010006 (0.065%); hidden pressure 2.44%; u 0.54%, v 2.69% (20 snapshots) | **passed** |
 | PI-DeepONet cavity | zero-shot error < 10% at Re=400 (Re in [300, 530] never sampled in training) | deeponet_cavity_curr2 + 4 continuations (660k Adam steps in total, lr 3e-4 with clipping, last 60k with a 4x larger batch; planned 200k + 20k) | velocity vs FD at Re=400: **9.65%** (14.0% after the curriculum, then 11.1%, 10.27%, 10.11%, 9.65%); Re=100 2.1%, Re=1000 30.0% | **passed** (D8, D10-D12) |
+| the same, fast jet (`stenosis_mri_fast`, data/stenosis_fast) | peak drop within 10% of the truth (4.13 mmHg) | stenosis_mri_fast (2026-10-20, RTX 5070 Ti, 6 x 192, 80k Adam steps, 1.6 h; published to the model repository) | peak dp 3.96 mmHg (**4.1%**), cycle RMS 3.6%, mean 1.84 against 1.95; hidden pressure 9.0%, u 7.2% (v 104%: the cross-flow is small); simplified Bernoulli 4.99 mmHg (+20.7%) | **passed** |
+| real data: coarctation phantom, P2 baseline | network peak drop closer to the catheter than Bernoulli (30% mean error) | coa_P2_baseline (laminar, 60k, prep v4); coa_P2_baseline_eddy (RAD, stopped at 37.4k) | 0.30 and 0.10 mmHg against 13.1 (97.7%, 99.2%); Bernoulli 8.0, pressure Poisson 7.9 | **failing** (momentum residual carries the systolic acceleration; "Real data") |
 | real-world use case: stenosis from MRI (synthetic) | peak trans-stenotic pressure drop within 10% of the CFD truth (0.594 mmHg) | stenosis_mri_G (2026-10-20, RTX 3060 Laptop, 6 x 128, 40k Adam steps, 1.6 h; served checkpoint = end of Adam) | peak dp 0.557 mmHg (**6.2%**), cycle RMS 2.9%; hidden pressure 3.9%, u 4.1% (v 62%: the cross-flow is small); simplified Bernoulli on the same scan 0.781 mmHg (+31.5%) | **passed** |
 
 ## Run log
@@ -348,14 +350,61 @@ is not meaningful then (the JAX peak is).
   voxel-frames by the network's misfit (`training.rad_data`), p ~ err^k / mean(err^k) + c. With the handbook's k=1,
   c=1 the systolic jet's share of the data batch rises only from 6% to 7.4%; with k=2, c=0 (the `coa_mri` default
   now; `rad_uniform_frac` keeps 20% uniform) to 18%. One update takes about 7 s on the laptop CPU. Not trained yet.
+- **The eddy test with RAD, and why the pressure stays flat (desktop, 2026-10-23; training stopped on request).**
+  - **`coa_P2_baseline_eddy`** (prep v4, RAD k=2 c=0, `nu_t_reg_weight` 0.01), stopped at step 37.4k of 60k:
+
+    | step | peak drop (mmHg) | nu_t / nu, mean | nu_t / nu, p99 | velocity fit |
+    |---|---|---|---|---|
+    | 5k | 0.39 | 2.5 | 12.3 | 0.41 |
+    | 10k | 0.16 | 0.06 | 0.69 | 0.36 |
+    | 20k | 0.17 | 0.003 | 0.03 | 0.35 |
+    | 30k | 0.10 | 0.002 | 0.002 | 0.34 |
+
+  - **`test_eddy_reg0001`** (the same with `nu_t_reg_weight` 0.001), stopped at 19.4k: nu_t/nu mean 10.6 -> 1.6 -> 0.35
+    (p99 24 -> 16 -> 5) at 5k/10k/15k, peak drop 0.34 -> 0.14 -> 0.10 mmHg. A 10x weaker penalty only slows the
+    collapse; and while nu_t was still 10x the fluid's viscosity the drop was no larger. The penalty is not the cause.
+  - **Two laminar tests, P2 baseline, collocation RAD only (k=1, c=1), stopped at 25k:** `test_rad` 0.23 -> 0.06 mmHg
+    over 5k-25k; `test_rad_phys` (the momentum and continuity weights fixed at 10, data terms adaptive) 0.15 -> 0.11
+    mmHg, with r_u 5x lower than without (6e-5 against 3e-4). Neither run's momentum balance improved along the path
+    below.
+  - **The momentum balance along the vessel** (`scripts/coa_momentum_path.py`, laminar `coa_P2_baseline`, prep v4, no
+    RAD). Path integrals over the 259 mm lumen path from the AAo to the DAo plane centre, in mmHg:
+
+    | t (x 10 ms) | int u_t | int conv | int visc | required p(DAo) - p(AAo) | network |
+    |---|---|---|---|---|---|
+    | 12.5 | +4.55 | -0.13 | -0.11 | -4.53 | +0.05 |
+    | 18.5 | +3.73 | +2.31 | -0.17 | -6.21 | -0.12 |
+    | 24.5 (peak flow) | -0.51 | +5.89 | -0.15 | -5.52 | -0.34 |
+    | 49.0 | -3.72 | -0.89 | -0.17 | +4.44 | +0.10 |
+
+    - The network's own velocity field needs a 6.2 mmHg peak drop from the laminar terms alone (pressure Poisson on
+      the scan: 7.9; catheter 13.1). Its pressure supplies 0.1-0.3. The difference sits in the momentum residual.
+    - The unbalanced part is mostly the time derivative: the column of fluid speeds up early in systole (+4.6 mmHg at
+      t = 12.5) and slows after it (-3.7 at t = 49) with no pressure difference behind either.
+    - The residual is small on average (mean square 4e-4) but coherent in systole: RMS |r_mom| 0.06 in systole
+      against 0.012 in diastole, twice that in the 200 fastest voxels. 0.02 per length unit along the flow over
+      26 units is the whole missing drop.
+    - `test_rad_phys` at 20k shows the same pattern (t = 12.5: +4.94 u_t, network -0.03), so neither RAD nor heavier
+      physics weights close it. With the residual already carrying the imbalance, nu_t has nothing to explain, which
+      is why it collapses.
+  - **Not yet known:** why the optimiser prefers an unbalanced time derivative to a pressure gradient. Candidates to
+    check (CPU, no training): whether the scan's own frame-to-frame acceleration is consistent with a rigid,
+    incompressible vessel (phantom wall compliance, the 60 ms acquisition window against the ~60 ms frame spacing,
+    the frame times against the catheter phase), and the per-time pressure anchor at the DAo centre.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`docs/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
 
 ## Open issues
 
-- Coarctation phantom: the laminar network recovers the jet's pressure downstream (0.3 against 13.1 mmHg on P2
-  baseline). Next: the eddy-viscosity network on prep v4 data with RAD; then, if nu_t ~ 0 again, a weaker `nu_t_reg`.
+- Coarctation phantom: every network so far gives 0.06-0.39 mmHg against 13.1 on P2 baseline (laminar, eddy, RAD,
+  heavier physics weights, a 10x weaker nu_t penalty). The momentum residual, not the pressure, carries the flow's
+  acceleration in systole ("Real data", 2026-10-23). The desktop queue is stopped until that is understood; the
+  remaining 15 phantom runs would take about 17 h with RAD.
+- Desktop stability: Windows restarted without a clean shutdown (Kernel-Power 41, no bugcheck) on 2026-10-20 (twice),
+  10-21 and 10-22 (twice); four of the five during GPU training. Suspect the power supply or the GPU's 16-pin cable under
+  load spikes. `nvidia-smi -pl 250` (the card's minimum, admin) would cap them. A restart kills the run in progress;
+  the driver is resumable but not restarted automatically.
 
 - Cavity: D1 above (rows C, D and the soft-lid F rerun are queued in this order).
 - Cylinder: start with `--windows 4 --steps 50000` to check the causal weights converge before the 16-window run.

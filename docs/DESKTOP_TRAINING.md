@@ -14,7 +14,7 @@ shows the results in the live viewer. Finished runs travel through a private Git
 | `stenosis_mri_fast` | synthetic stenosis, 70% narrowing, Re 300, a ~1.1 m/s jet, 4.2 mmHg peak drop | closer to the fast jets the clinical Doppler rule (4 v^2) was made for |
 | `coa_P2_baseline`, `coa_P2_baseline_eddy` | real 4D flow MRI of a coarctation phantom, scored against catheter pressure | laminar network vs network with a learned eddy viscosity |
 | `coa_P2_severe`, `coa_P2_severe_eddy` | the same for the severe P2 phantom | |
-| `coa_<other six cases>_eddy`, then `coa_<other six>` | P1 cases and the low-flow cases | the full comparison |
+| `coa_<case>`, `coa_<case>_eddy` for each of the other six cases, in pairs | P1 cases and the low-flow cases | the full comparison |
 
 `runs/coa_report/report.md` (republished after every real-data run) tables every case: catheter, conventional 4D-flow
 pressure Poisson estimate, simplified Bernoulli, and both networks, with the slope and R^2 against the catheter.
@@ -36,6 +36,10 @@ pressure Poisson estimate, simplified Bernoulli, and both networks, with the slo
     falls about 4 mmHg through the narrowing and recovers downstream: laminar physics has no term for the
     turbulent loss the catheter measures. More laminar runs will not fix this; the eddy-viscosity network is the test.
   - If an eddy run ends with `nu_t_mean_over_nu` near 0 again, rerun it with `--set problem.nu_t_reg_weight=0.001`.
+  - Desktop, later on 2026-10-23: the eddy run with RAD collapsed too (nu_t/nu 2.5 at 5k, 0.002 at 30k; 0.10 mmHg),
+    and so did a run with `nu_t_reg_weight=0.001` (10.6 -> 0.35 by 15k; 0.10 mmHg). Along the vessel the momentum
+    residual, not the pressure, carries the flow's acceleration (`scripts/coa_momentum_path.py`; STATUS.md). **The
+    queue is stopped**: do not restart the driver for the phantom runs until that is resolved.
 - **RAD for `coa_mri` needs this repository at or after the commit "Phantom: RAD of collocation points and data".**
   - Before it, `--set training.rad_every=1000` was accepted but did nothing for this problem: no residual function,
     so the resampling was skipped silently. A run started on older code is uniform sampling whatever its log says.
