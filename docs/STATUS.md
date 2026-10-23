@@ -648,8 +648,15 @@ is not meaningful then (the JAX peak is).
   - **Our pressure network loses part of the drop.** The same measured acceleration gives 7.72 mmHg from the grid
     solve and 5.33 from the pressure-network fit on the registered data (flowp_pressure_fit.py). The network (4 x 128
     tanh, Fourier sigma 1/4/12, 12 time harmonics) is smoother than the throat's pressure change, and the resampling
-    onto the scan's voxels may cost some too. This bounds every network so far (5.3-6.1). Next: a pressure network
-    with more capacity for sharp features, judged by reproducing the grid solve on the same data, then the 60k runs.
+    onto the scan's voxels may cost some too. This bounds every network so far (5.3-6.1).
+  - **It is the half-frame shift, not the network** (`claude helper/diagnostics/flowp_pressure_capacity.py`, CPU). The
+    same least-squares solve on the scan's own voxels (31,614 inside): **7.08 mmHg** with `acc`, **5.84** with
+    `acc_frac` (the linear half-frame interpolation flattens the systolic peak), against 7.72 on the native grid
+    (domain and resampling: about 0.6). Pressure networks fitted to the `acc_frac` field: 4 x 128 sigma 1/4/12 (the
+    default) 5.33, 4 x 256 with sigma 24 added 4.96, 6 x 256 with sigma 40 added 2.30 (it fits the noise). The
+    default network is within 0.5 mmHg of the grid solve; capacity is not the limit. Use `acc` for the pressure.
+  - **With the released data, ~7-7.7 mmHg is the ceiling for acceleration-driven pressure at these planes**
+    (Bernoulli 8.0, catheter 13.1); the publication's 15.9 is not in the released file.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`claude helper/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
