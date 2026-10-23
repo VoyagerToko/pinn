@@ -426,6 +426,42 @@ is not meaningful then (the JAX peak is).
   fresh pressure network. On the laptop GPU: peak drop 2.04 (random start) -> 0.34 mmHg at step 500 while the momentum
   residual fell from 2.9e-2 to 1.6e-3; not decided yet. If the drop stays flat, a separate network is not enough and
   the loss has to check the drop along the vessel (an integral form of the momentum balance).
+  - **Desktop test, 2026-10-23: passed.** P2 baseline, prep v5 (`cath_shift_ms` -147, `cath_shift_corr` 0.974), RTX
+    5070 Ti capped at 250 W, laminar, RAD on, not published (`runs/_test_pnet_warm`, `runs/_test_pnet_cold`).
+    Peak and mean drop in mmHg against the catheter's 13.1 and 3.68:
+
+    | step | warm: peak | mean | velocity fit | r_u |
+    |---|---|---|---|---|
+    | 0 | 2.04 (fresh pressure network) | +1.08 | 0.346 | 2.9e-2 |
+    | 500 | 0.34 | -0.11 | 0.344 | 1.6e-3 |
+    | 1000 | 0.53 | +0.26 | 0.345 | 8.7e-4 |
+    | 1500 | 0.76 | +0.46 | 0.340 | 6.4e-4 |
+    | 2000 | 1.00 | +0.58 | 0.348 | 5.5e-4 |
+    | 2500 | 1.37 | +0.63 | 0.348 | 4.8e-4 |
+    | 3000 | 1.55 | +0.63 | 0.358 | 4.2e-4 |
+    | 3500 | 1.93 | +0.68 | 0.351 | 4.0e-4 |
+    | 4000 | 2.16 | +0.74 | 0.357 | 4.1e-4 |
+    | 4500 | 2.46 | +0.77 | 0.361 | 3.7e-4 |
+    | 5000 | 2.81 | +0.89 | 0.359 | 2.9e-4 |
+    | 5500 | 3.14 | +0.86 | 0.360 | 3.8e-4 |
+    | 6000 | **3.36** | +0.88 | 0.358 | 3.1e-4 |
+
+    | step | cold (from scratch, `train.py --steps 20000`): peak | mean | velocity fit | r_u | old shared output: peak |
+    |---|---|---|---|---|---|
+    | 0 | 1.20 | +0.42 | 5.154 | 1.6e+1 | |
+    | 5000 | 1.99 | +0.38 | 0.404 | 9.0e-4 | 0.24 |
+    | 10000 | 3.41 | +0.72 | 0.358 | 4.0e-4 | |
+    | 15000 | 4.60 | +0.90 | 0.348 | 2.5e-4 | |
+    | 20000 | **5.28** | +0.86 | 0.342 | 1.4e-4 | 0.25 |
+
+    - Both climb while the momentum residual falls: the separate network puts the inertia into the pressure. The
+      warm run gains about 0.3 mmHg per 500 steps to the end; the cold one is still rising at 20k (+0.68 over the
+      last 5k), 21x the shared output's drop at the same step, at an unchanged velocity fit.
+    - The mean settles at 0.86-0.88 mmHg, the laminar limit the stand-alone fit gave (0.85): over a beat the
+      time-derivative term integrates to zero and laminar friction is all that is left. The peak's expected laminar
+      ceiling is the stand-alone 7.26 (Bernoulli 8.0 on this case); the rest of the catheter's 13.1 needs the
+      turbulent loss, i.e. the eddy-viscosity network, which can now act on the pressure. Its cold test
+      (`runs/_test_pnet_cold_eddy`, 20k steps, `nu_t_reg_weight` 0.01) is running.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`docs/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
@@ -435,8 +471,9 @@ is not meaningful then (the JAX peak is).
 - Coarctation phantom: every network so far gives 0.06-0.39 mmHg against 13.1 on P2 baseline (laminar, eddy, RAD,
   heavier physics weights, a 10x weaker nu_t penalty). The momentum residual, not the pressure, carries the flow's
   acceleration in systole ("Real data", 2026-10-23). A pressure fitted alone to the same velocity gives 7.26 mmHg
-  (correlation 0.96 with the catheter's waveform), so the cause is the joint training. The separate pressure network is
-  under test; the desktop queue stays stopped until it passes (the remaining phantom runs take about 17 h).
+  (correlation 0.96 with the catheter's waveform), so the cause is the joint training. The separate pressure network
+  passed its desktop test (5.28 mmHg at 20k from scratch, still rising; "Real data"). The eddy-viscosity version is
+  under test; the desktop queue stays stopped until it is decided (prep v5 retrains all 16, about 17 h).
 - Desktop stability: Windows restarted without a clean shutdown (Kernel-Power 41, no bugcheck) on 2026-10-20 (twice),
   10-21 and 10-22 (twice); four of the five during GPU training. Suspect the power supply or the GPU's 16-pin cable under
   load spikes. `nvidia-smi -pl 250` (the card's minimum, admin) would cap them. A restart kills the run in progress;
