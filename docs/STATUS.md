@@ -687,6 +687,34 @@ is not meaningful then (the JAX peak is).
     - The viewer's `coa_P2_baseline_eddy` slot now holds A (republished with its report); `accel_data` is off in that
       copy of the config, since inference needs no 4D-FlowP file.
     - Next: the other seven cases at prep v5 with their 4D-FlowP registered (running on the CPU), then A on all eight.
+  - **The held-out test (2026-10-24).** All 8 cases prepared at prep v5 (QA OK) and their 4D-FlowP registered by
+    `claude helper/diagnostics/flowp_register.py`. The script now puts both scans on one beat clock: the 4D-FlowP
+    frame k sits at tau + 60 ms * k, tau from the velocity agreement. The P1 cases (14 4D-FlowP frames against 13) and
+    P2 baseline lowflow (17 against 16) need that. The translation refinement is capped at one voxel and kept only if
+    it helps on held-out voxels. Every case picks axis and component signs +1 (runner-up Dice at most 0.505).
+
+    | case | Dice mask / final | systolic velocity corr a / b / c | plane flux corr | inside / N |
+    |---|---|---|---|---|
+    | P1 baseline | 0.728 / 0.714 | 0.88 / 0.955 / 0.72 | 0.991 | 15862 / 21275 |
+    | P1 severe | 0.760 / 0.756 | 0.76 / 0.926 / 0.43 | 0.965 | 16084 / 20718 |
+    | P1 baseline lowflow | 0.790 / 0.789 | 0.88 / 0.933 / 0.71 | 0.995 | 16463 / 20218 |
+    | P1 severe lowflow | 0.791 / 0.788 | 0.80 / 0.930 / 0.47 | 0.989 | 15170 / 18411 |
+    | P2 baseline | 0.861 / 0.856 | 0.84 / 0.941 / 0.66 | 0.982 | 31614 / 33980 |
+    | P2 baseline lowflow | 0.793 / 0.793 | 0.85 / 0.945 / 0.74 | 0.994 | 26937 / 32312 |
+    | P2 severe | 0.653 / 0.647 | 0.48 / 0.872 / 0.58 | 0.982 | 24337 / 29130 |
+    | P2 severe lowflow | 0.779 / 0.777 | 0.77 / 0.912 / 0.55 | 0.942 | 22969 / 25761 |
+
+    - **P2 severe is weak:** the two scans are not one rigid body there (the patient-left half prefers a ~3 mm shift,
+      the right half none). Its acceleration agrees only loosely with the scan's own Du/Dt (corr 0.12-0.19 against
+      0.3-0.5 elsewhere). It stays in the test with that caveat.
+    - **One timing rule for all cases: `acc_floor`**, the latest whole 4D-FlowP frame at or before each scan frame (no
+      blending). It is byte-identical to the integer-offset `acc` the development case (P2 baseline) trained on, and to
+      P2 severe and P2 severe lowflow's. In systole every case's frame is 23-38 ms early, the same side as P2 baseline.
+      Blending in time (`acc` of the unequal-count cases) flattens the systolic peak by 16-34%, so it is not used.
+    - **The frozen setup** (`coa_<case>_accel_60k`): pressure network, Smagorinsky 0.17, the measured acceleration
+      (`acc_floor`) as data, prep v5, RAD, 60k steps. Nothing is tuned per case. P2 baseline was the development case;
+      the other seven are the test. The bar is Bernoulli's 30.4% mean error (pressure Poisson 45.7%). Running from
+      2026-10-24 03:15 UTC, two at a time, about 14 h.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`claude helper/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
