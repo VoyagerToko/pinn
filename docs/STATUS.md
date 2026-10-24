@@ -20,7 +20,7 @@ kept under their own names; nothing is deleted.
 | inverse wake | lambda_1, lambda_2 recovered; hidden pressure | cylinder_inverse (25k + 1k, reduced) | lambda_1 = 0.99997 (0.004%), lambda_2 = 0.010006 (0.065%); hidden pressure 2.44%; u 0.54%, v 2.69% (20 snapshots) | **passed** |
 | PI-DeepONet cavity | zero-shot error < 10% at Re=400 (Re in [300, 530] never sampled in training) | deeponet_cavity_curr2 + 4 continuations (660k Adam steps in total, lr 3e-4 with clipping, last 60k with a 4x larger batch; planned 200k + 20k) | velocity vs FD at Re=400: **9.65%** (14.0% after the curriculum, then 11.1%, 10.27%, 10.11%, 9.65%); Re=100 2.1%, Re=1000 30.0% | **passed** (D8, D10-D12) |
 | the same, fast jet (`stenosis_mri_fast`, data/stenosis_fast) | peak drop within 10% of the truth (4.13 mmHg) | stenosis_mri_fast (2026-10-20, RTX 5070 Ti, 6 x 192, 80k Adam steps, 1.6 h; published to the model repository) | peak dp 3.96 mmHg (**4.1%**), cycle RMS 3.6%, mean 1.84 against 1.95; hidden pressure 9.0%, u 7.2% (v 104%: the cross-flow is small); simplified Bernoulli 4.99 mmHg (+20.7%) | **passed** |
-| real data: coarctation phantom, P2 baseline | network peak drop closer to the catheter than Bernoulli (30% mean error) | coa_P2_baseline (laminar, 60k, prep v4); coa_P2_baseline_eddy (RAD, stopped at 37.4k) | 0.30 and 0.10 mmHg against 13.1 (97.7%, 99.2%); Bernoulli 8.0, pressure Poisson 7.9 | **failing** (momentum residual carries the systolic acceleration; "Real data") |
+| real data: coarctation phantom, P2 baseline | network peak drop closer to the catheter than Bernoulli (30% mean error over the 8 cases) | coa_P2_baseline_accel_60k (2026-10-23: pressure network + Smagorinsky 0.17 + measured 4D-FlowP acceleration as data, prep v5, 60k) | peak **8.74** mmHg against 13.1 (**33.3%**), mean 1.61 against 3.68; on this case Bernoulli 8.0 (39%), pressure Poisson 7.9 (40%) | **ahead of Bernoulli on P2 baseline**; the 8-case comparison is pending ("Real data") |
 | real-world use case: stenosis from MRI (synthetic) | peak trans-stenotic pressure drop within 10% of the CFD truth (0.594 mmHg) | stenosis_mri_G (2026-10-20, RTX 3060 Laptop, 6 x 128, 40k Adam steps, 1.6 h; served checkpoint = end of Adam) | peak dp 0.557 mmHg (**6.2%**), cycle RMS 2.9%; hidden pressure 3.9%, u 4.1% (v 62%: the cross-flow is small); simplified Bernoulli on the same scan 0.781 mmHg (+31.5%) | **passed** |
 
 ## Run log
@@ -667,6 +667,26 @@ is not meaningful then (the JAX peak is).
     the networks at 20k reached 5.3-6.1 with the jet smoother than the scan (velocity fit 0.35). The 60k runs A and B
     (pressure network + Smagorinsky + the measured acceleration `acc` as data, B also with `accel_pressure`) are
     running; ~7.5-8 mmHg is the realistic target with this data.
+  - **The 60k runs (desktop, 2026-10-23 19:17-23:10 UTC, side by side, both published).** Peak / mean (mmHg):
+
+    | step | A: acceleration as data | mean | accel fit | B: + accel_pressure | mean | grad-p fit |
+    |---|---|---|---|---|---|---|
+    | 5000 | 2.36 | 0.67 | 0.961 | 3.73 | -0.16 | 0.611 |
+    | 10000 | 4.35 | 0.98 | 0.827 | 4.28 | -0.01 | 0.584 |
+    | 20000 | 6.02 | 1.29 | 0.747 | 4.82 | -0.09 | 0.551 |
+    | 30000 | 7.22 | 1.38 | 0.697 | 5.22 | 0.05 | 0.544 |
+    | 40000 | 8.18 | 1.55 | 0.670 | 5.40 | 0.09 | 0.536 |
+    | 50000 | 8.61 | 1.61 | 0.662 | 5.59 | 0.15 | 0.531 |
+    | 60000 | **8.74** | **1.61** | 0.676 | 5.61 | 0.23 | 0.541 |
+
+    - **A: 8.74 mmHg (33.3% error), mean 1.61**, above Bernoulli (8.0) and pressure Poisson (7.9) on this case and
+      above a plain grid solve of its own velocity data (7.71): the first network on the phantom to do so. Velocity fit
+      0.336, Smagorinsky nu_t/nu 0.94 mean (8.3 at p99). It levelled off after 50k.
+    - B pins the pressure to the measured field's gradient part and stays near its projection (5.6, mean ~0), as the
+      acceleration-only fit predicted. Acceleration as data (A) is the configuration to carry on.
+    - The viewer's `coa_P2_baseline_eddy` slot now holds A (republished with its report); `accel_data` is off in that
+      copy of the config, since inference needs no 4D-FlowP file.
+    - Next: the other seven cases at prep v5 with their 4D-FlowP registered (running on the CPU), then A on all eight.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`claude helper/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
