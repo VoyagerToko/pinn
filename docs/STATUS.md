@@ -20,7 +20,7 @@ kept under their own names; nothing is deleted.
 | inverse wake | lambda_1, lambda_2 recovered; hidden pressure | cylinder_inverse (25k + 1k, reduced) | lambda_1 = 0.99997 (0.004%), lambda_2 = 0.010006 (0.065%); hidden pressure 2.44%; u 0.54%, v 2.69% (20 snapshots) | **passed** |
 | PI-DeepONet cavity | zero-shot error < 10% at Re=400 (Re in [300, 530] never sampled in training) | deeponet_cavity_curr2 + 4 continuations (660k Adam steps in total, lr 3e-4 with clipping, last 60k with a 4x larger batch; planned 200k + 20k) | velocity vs FD at Re=400: **9.65%** (14.0% after the curriculum, then 11.1%, 10.27%, 10.11%, 9.65%); Re=100 2.1%, Re=1000 30.0% | **passed** (D8, D10-D12) |
 | the same, fast jet (`stenosis_mri_fast`, data/stenosis_fast) | peak drop within 10% of the truth (4.13 mmHg) | stenosis_mri_fast (2026-10-20, RTX 5070 Ti, 6 x 192, 80k Adam steps, 1.6 h; published to the model repository) | peak dp 3.96 mmHg (**4.1%**), cycle RMS 3.6%, mean 1.84 against 1.95; hidden pressure 9.0%, u 7.2% (v 104%: the cross-flow is small); simplified Bernoulli 4.99 mmHg (+20.7%) | **passed** |
-| real data: coarctation phantom, P2 baseline | network peak drop closer to the catheter than Bernoulli (30% mean error over the 8 cases) | coa_P2_baseline_accel_60k (2026-10-23: pressure network + Smagorinsky 0.17 + measured 4D-FlowP acceleration as data, prep v5, 60k) | peak **8.74** mmHg against 13.1 (**33.3%**), mean 1.61 against 3.68; on this case Bernoulli 8.0 (39%), pressure Poisson 7.9 (40%) | **ahead of Bernoulli on P2 baseline**; the 8-case comparison is pending ("Real data") |
+| real data: coarctation phantom, P2 baseline | network peak drop closer to the catheter than Bernoulli (30% mean error over the 8 cases) | coa_P2_baseline_accel_60k (2026-10-23: pressure network + Smagorinsky 0.17 + measured 4D-FlowP acceleration as data, prep v5, 60k) | P2 baseline: peak 8.74 mmHg against 13.1 (33.3%; Bernoulli 39%). **All 8 cases: mean error 42.0%** (laminar network 42.3%) against Bernoulli **30.4%** and pressure Poisson 45.7%; R^2 negative | **failed** (2026-10-27; behind Bernoulli, ahead of pressure Poisson; "Real data") |
 | real-world use case: stenosis from MRI (synthetic) | peak trans-stenotic pressure drop within 10% of the CFD truth (0.594 mmHg) | stenosis_mri_G (2026-10-20, RTX 3060 Laptop, 6 x 128, 40k Adam steps, 1.6 h; served checkpoint = end of Adam) | peak dp 0.557 mmHg (**6.2%**), cycle RMS 2.9%; hidden pressure 3.9%, u 4.1% (v 62%: the cross-flow is small); simplified Bernoulli on the same scan 0.781 mmHg (+31.5%) | **passed** |
 
 ## Run log
@@ -715,6 +715,38 @@ is not meaningful then (the JAX peak is).
       (`acc_floor`) as data, prep v5, RAD, 60k steps. Nothing is tuned per case. P2 baseline was the development case;
       the other seven are the test. The bar is Bernoulli's 30.4% mean error (pressure Poisson 45.7%). Running from
       2026-10-24 03:15 UTC, two at a time, about 14 h.
+  - **Result (all 16 runs done 2026-10-27, published, in the viewer's slots).** The desktop went down without a
+    clean shutdown on 2026-10-24 ~16:10 UTC with P2 severe's acceleration run at 42.5k; it was continued from its 40k
+    checkpoint for 20k (learning rate resumed at 1.582e-4, the 60k schedule's value). Three publishes failed on a
+    GitHub TLS timeout and were redone. A laminar pressure-network run (60k, no Smagorinsky, no acceleration) was
+    trained for every case as the viewer's left tank. Peak drop, mmHg (error against the catheter):
+
+    | case | catheter | Bernoulli | pressure Poisson | network, laminar | network, Smagorinsky + acceleration |
+    |---|---|---|---|---|---|
+    | P1 baseline | 16.2 | 10.3 (36%) | 6.5 (60%) | 20.3 (25%) | 22.1 (36%, high) |
+    | P1 severe | 24.7 | 22.0 (11%) | 10.2 (59%) | 16.4 (33%) | 16.3 (34%) |
+    | P2 baseline (development) | 13.1 | 8.0 (39%) | 7.9 (40%) | 8.8 (33%) | 8.7 (33%) |
+    | P2 severe | 20.8 | 16.7 (20%) | 14.5 (30%) | 4.8 (77%) | 3.7 (82%) |
+    | P1 baseline lowflow | 8.9 | 5.1 (43%) | 5.3 (41%) | 14.8 (65%, high) | 14.9 (67%, high) |
+    | P1 severe lowflow | 13.4 | 12.0 (10%) | 6.7 (50%) | 9.8 (27%) | 11.8 (12%) |
+    | P2 baseline lowflow | 7.2 | 3.9 (46%) | 4.9 (32%) | 5.7 (21%) | 6.4 (11%) |
+    | P2 severe lowflow | 12.0 | 7.4 (38%) | 5.5 (54%) | 5.2 (57%) | 4.7 (61%) |
+    | **mean error, 8 cases** | | **30.4%** | 45.7% | 42.3% | 42.0% |
+
+    - **The networks miss the gate:** 42% mean error against Bernoulli's 30.4%; ahead of pressure Poisson (45.7%).
+      Their slope is 0.7 but R^2 is negative (-0.1, -0.2): the errors are not a consistent bias. Over the seven held-out
+      cases alone: 43.6% laminar, 43.3% with acceleration.
+    - **The measured acceleration does not help on average** (42.0 against 42.3%). It helps where its registration is
+      good (P2 baseline lowflow 21 -> 11%, P1 severe lowflow 27 -> 12%) and hurts where it is weak (P2 severe, Dice
+      0.65, 77 -> 82%).
+    - **Two failure kinds:** far too low on P2 severe and P2 severe lowflow (the severe P2 jet: the scan's own
+      velocity supports little more, and P2 severe's two scans do not register as one rigid body), and far too high
+      on the P1 baseline cases (both networks, so not the acceleration term: something in P1's velocity, mask or
+      planes; not investigated yet).
+    - **Next (proposed, not started):** train on the 4D-FlowP scan alone (its velocity and acceleration agree in
+      space and time by construction; the scan is only needed for the catheter planes), weight the acceleration by
+      its reliability (wall voxels and low signal down), and look at the P1 baseline overshoot. Develop on P2
+      baseline, freeze, rerun the eight.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`claude helper/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
