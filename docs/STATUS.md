@@ -747,6 +747,40 @@ is not meaningful then (the JAX peak is).
       space and time by construction; the scan is only needed for the catheter planes), weight the acceleration by
       its reliability (wall voxels and low signal down), and look at the P1 baseline overshoot. Develop on P2
       baseline, freeze, rerun the eight.
+  - **Read at the catheter's own locations (2026-10-30).** The catheter recorded the descending aorta at 5 slice
+    locations; on P1 its peak drop changes a lot between them (P1 baseline 11.7, 14.9, 16.2, 20.2, 23.2 mmHg; P2
+    within 1.4). The networks were scored at the 2D-PC outlet plane, not at a catheter location.
+    - `claude helper/diagnostics/coa_dao_sweep.py`: a network's peak drop along the descending limb rises steadily
+      (P1 baseline laminar 13.7 -> 30.8 mmHg from just below the arch to the bottom of the scan; P2 baseline 6.6 ->
+      12.3), so the reading position matters for the networks on both geometries.
+    - The gel markers are visible in each case's 3D GRE anatomy scan (1 mm): 5 bars stacked beside the descending
+      aorta (DAo locations 1-5) and 1 beside the ascending aorta (the fixed AAo location). `gre_markers.py` and
+      `gre_find_markers.py` render and search them; the automatic search confuses them with air bubbles and vessel
+      edges, so the rows were checked by eye on overlays and fixed in `marker_rescore.py` where needed (P1: the
+      slanted top bar; P2 baseline and P2 severe lowflow: the AAo bar). Location 3 is the middle of the 5 bars,
+      whichever way they are numbered.
+    - `claude helper/diagnostics/marker_rescore.py` reads the trained networks (no retraining) as cross-section
+      means of the lumen at the AAo marker's height (ascending limb) and the DAo location-3 marker's height
+      (descending limb), in patient coordinates. Peak error against the catheter's location 3:
+
+      | case | Bernoulli | network + acceleration: 2D-PC planes -> markers | laminar: 2D-PC planes -> markers |
+      |---|---|---|---|
+      | P1 baseline | 36% | 36% -> **7%** (17.4 mmHg) | 25% -> **9%** (14.7) |
+      | P1 baseline lowflow | 43% | 67% -> 32% (11.9) | 65% -> 24% (11.1) |
+      | P1 severe | 11% | 34% -> 46% (13.5) | 33% -> 52% (11.8) |
+      | P1 severe lowflow | 10% | 12% -> 29% (9.5) | 27% -> 41% (7.8) |
+      | P2 baseline | 39% | 33% -> 42% (7.7) | 33% -> 43% (7.4) |
+      | P2 baseline lowflow | 46% | 11% -> 32% (4.9) | 21% -> 40% (4.3) |
+      | P2 severe | 20% | 82% -> 90% (2.0) | 77% -> 88% (2.5) |
+      | P2 severe lowflow | 38% | 61% -> 70% (3.7) | 57% -> 67% (3.9) |
+      | **mean** | **30.4%** | 42.0% -> **43.5%** | 42.3% -> **45.5%** |
+
+    - At the catheter's locations the networks fit the P1 baseline cases (7-9%, the "overshoot" was the reading
+      position) but every other case gets worse: the 2D-PC outlet plane sat near the bottom marker, where the
+      networks' drop is largest. The gap to Bernoulli is real (~44% against 30.4%). The severe narrowings fail most
+      (2-4 mmHg against 12-21): a narrow fast jet is what the scan blurs and the physics cannot restore.
+    - The pressure Poisson baseline is still read at the 2D-PC planes; reading it at the markers too is open. A prep
+      version with marker planes (for the report and viewer) is not made yet.
 - **Networks.** `coa_mri`: 3D, periodic over the beat, voxel-averaged data. It runs laminar, or with a learned eddy
   viscosity field (`problem.eddy_viscosity`). Training runs on the desktop (`claude helper/DESKTOP_TRAINING.md`); results go to
   `runs/coa_report/report.md`.
