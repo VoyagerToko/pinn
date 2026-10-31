@@ -11,5 +11,10 @@ also misses. Imposing the regularised lid exactly, an impulsive inflow and gradi
 networks that violate mass or energy conservation, and the cylinder and three-dimensional Taylor--Green gates
 were not met within the reduced budgets the available GPU time allowed. A physics-informed DeepONet trained over
 $100\le\Rey\le1000$ predicts the cavity at an unseen $\Rey=400$ with a 9.6\% error, passing its 10\% gate after three
-times the planned training. We report all runs (30.5 GPU hours in total), their costs and the reasons for each
-failure.
+times the planned training. We then infer pressure from flow MRI. On a synthetic stenosis seen through a simulated
+scan, a network with exact walls recovers the peak pressure drop to 4--6\%, against 21--31\% for the simplified
+Bernoulli rule. On a public phantom of eight aortic coarctations with catheter pressure, a diagnosed failure (the
+pressure absorbed into a coherent momentum residual) led to a separate periodic pressure network and to the measured
+acceleration as data, which beat Bernoulli on the development case (33\% against 39\%); frozen and applied to all
+eight cases, however, the networks reach a 42\% mean error against Bernoulli's 30\%, failing most on severe jets that
+the scan does not resolve. We report all runs, their costs and the reasons for each failure.

@@ -2,6 +2,7 @@
 
     JAX_PLATFORMS=cpu python scripts/results/paper_figures.py cavity        # centreline profiles + divergence maps
     JAX_PLATFORMS=cpu python scripts/results/paper_figures.py ablation      # bar chart of the ablation rows
+    JAX_PLATFORMS=cpu python scripts/results/paper_figures.py phantom       # 8 phantom cases against the catheter
     JAX_PLATFORMS=cpu python scripts/results/paper_figures.py all
 
 Outputs go to paper/figures/*.pdf. Every curve is computed from a checkpoint in runs/ or from the
@@ -191,6 +192,35 @@ def fig_ablation():
     print("ablation figure ->", FIG)
 
 
+def fig_phantom():
+    """Peak trans-coarctation drop of every method against the catheter on the 8 phantom cases (2D-PC planes)."""
+    base = json.loads((RUNS / "coa_report" / "baselines.json").read_text())
+    cases = list(base)
+    cath = np.array([base[c]["catheter_peak_mmHg"] for c in cases])
+    series = [
+        ("Bernoulli", np.array([base[c]["bernoulli_peak_mmHg"] for c in cases]), "o", "C0"),
+        ("pressure Poisson", np.array([base[c]["ppe_peak_mmHg"] for c in cases]), "s", "C7"),
+        ("PINN, laminar", np.array([json.loads((RUNS / f"coa_{c}_lam_60k" / "final_eval.json").read_text())
+                                    ["dp_peak_pinn_mmHg"] for c in cases]), "^", "C2"),
+        ("PINN, Smagorinsky + acceleration", np.array([json.loads((RUNS / f"coa_{c}_accel_60k" / "final_eval.json")
+                                                      .read_text())["dp_peak_pinn_mmHg"] for c in cases]), "D", "C3"),
+    ]
+    fig, ax = plt.subplots(figsize=(3.4, 3.7))
+    ax.plot([0, 26], [0, 26], color="0.6", lw=0.8)
+    for name, est, m, col in series:
+        err = 100 * np.mean(np.abs(est - cath) / cath)
+        ax.scatter(cath, est, marker=m, s=18, color=col, label=f"{name} ({err:.1f}%)", zorder=3)
+    ax.set_xlim(0, 26), ax.set_ylim(0, 26), ax.set_aspect("equal")
+    ax.set_xlabel("catheter peak drop [mmHg]"), ax.set_ylabel("estimated peak drop [mmHg]")
+    ax.grid(alpha=0.3)
+    fig.tight_layout(rect=(0, 0.23, 1, 1))
+    fig.legend(*ax.get_legend_handles_labels(), loc="lower center", ncol=1, frameon=False,
+               title="mean error over 8 cases", title_fontsize=7)
+    fig.savefig(FIG / "phantom_cases.pdf")
+    plt.close(fig)
+    print("phantom figure ->", FIG)
+
+
 if __name__ == "__main__":
     FIG.mkdir(parents=True, exist_ok=True)
     what = sys.argv[1] if len(sys.argv) > 1 else "all"
@@ -202,3 +232,5 @@ if __name__ == "__main__":
         fig_cavity()
     if what in ("ablation", "all"):
         fig_ablation()
+    if what in ("phantom", "all"):
+        fig_phantom()

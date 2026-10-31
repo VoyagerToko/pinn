@@ -26,6 +26,23 @@ share of the update, so terms that are satisfied or easy received weights of $46
 $2.4\times10^5$ (outflow) and $6\times10^9$ (initial $w$), while the hard terms were de-weighted. Terms with an
 identically zero target should at least be excluded from it.
 
+\paragraph{Pressure from MRI.} The synthetic stenosis and the phantom show the same mechanism from two sides. The
+pressure a network returns is only as good as the velocity it is fitted to: with exact walls and a resolved jet it
+was within 4--6\% of the truth, while on the real scans the severe jets are blurred and the drop follows the
+blurred velocity down (2--5~mmHg against 12--21). The development case gave an optimistic picture that the held-out
+protocol removed, and a second evaluation error, reading the network at a plane where the catheter never was, moved
+single cases by up to 60 percentage points; validation against catheter pressure must state where the catheter was.
+The coherent momentum residual that absorbed the phantom's pressure is the conservation failure of the benchmarks in
+another form: a mean-square loss cannot see a small error of constant sign, and the path integral that found it is
+the analogue of the flow-rate checks above.
+
+\paragraph{Future work.} The registration of the acceleration acquisition onto the velocity scan was the weak link
+where the acceleration hurt; training on the acceleration-encoded acquisition alone, whose velocity and acceleration
+agree by construction, removes it. Weighting the acceleration by its reliability (lower at the wall and at low
+signal), reading every method at the catheter markers, an integral momentum loss across the narrowing, and a
+super-resolution prior for the jet address the remaining gaps; several seeds and ensembles would give each predicted
+drop an uncertainty. The design must again be fixed on one case and tested on the other seven.
+
 \paragraph{References and limitations.} The Ghia $v$ table is about 2\% from grid-converged solutions, so a 2\%
 gate on it cannot be met even by an exact solution: gates should be stated against references that solve the same
 problem well beyond the required accuracy. Limitations: one seed per configuration; reduced budgets for the
@@ -38,5 +55,7 @@ stream functions) worked as intended where the data were compatible. The constra
 need care: exact boundary data fail when the data are incompatible with the equations, and gradient-norm balancing
 can reinstate that failure through the weights. Three of six gates were passed (A, the inverse problem and the
 parametric model, the last with three times its planned budget); the cavity gate cannot be met by any exact
-solution, and the cylinder and three-dimensional gates are out of reach of these budgets. Code, reference solver, logs and evaluation
+solution, and the cylinder and three-dimensional gates are out of reach of these budgets. For pressure from MRI the
+method passes on simulated scans (4--6\%) and fails on real ones: 42\% mean error on eight phantom cases against 30\%
+for the Bernoulli rule, limited by the resolution of the velocity data. Code, reference solver, logs and evaluation
 files for every number in this paper are in the accompanying repository.
