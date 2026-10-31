@@ -242,7 +242,8 @@ class Scene:
         if "data_dir" in spec:  # the dataset this scene is served from, relative to the repository root
             with self.cfg.unlocked():
                 self.cfg.problem.data_dir = str(ROOT / spec["data_dir"])
-        self.trained = has_cfg and (self.workdir / "latest.msgpack").exists()
+        # a checkpoint at the top, or per time window (the cylinder is trained window by window)
+        self.trained = has_cfg and ((self.workdir / "latest.msgpack").exists() or any(self.workdir.glob("window_*/latest.msgpack")))
         self.metrics = {
             "final_eval": read_json(self.workdir / "final_eval.json"),
             "eval": read_json(self.workdir / "eval.json"),
@@ -586,6 +587,15 @@ class Scene:
             tq = np.linspace(0.0, pr.T, 64, endpoint=False)
             out["t_s"] = (tq * 0.01).tolist()
             out["dp_pinn_mmHg"] = pr.pressure_drop(self.params, tq).tolist()
+            # the pressure's size over the whole beat (|p| 99th percentile on the lumen, relative to the downstream
+            # plane's mean as in _field_coa), so the viewer colours every frame on one scale instead of the first frame's
+            pos = np.asarray(pr.lumen)
+            mags = []
+            for ti in np.linspace(0.0, pr.T, 16, endpoint=False):
+                p = pr.predict(self.params, np.concatenate([np.full((len(pos), 1), ti, np.float32), pos], 1))[:, 3]
+                pd = pr.predict(self.params, np.concatenate([np.full((len(pr.dao), 1), ti, np.float32), pr.dao], 1))[:, 3].mean()
+                mags.append(np.abs(p - pd))
+            out["p_abs_p99_mmHg"] = float(np.percentile(np.concatenate(mags), 99) * pr.mmHg_per_unit)
         base = read_json(ROOT / "runs" / "coa_report" / "baselines.json")
         report = read_json(ROOT / "runs" / "coa_report" / "report.json")
         rows = {r["case"]: r for r in report.get("rows", [])}

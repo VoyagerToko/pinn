@@ -259,6 +259,8 @@ class MainWindow(QMainWindow):
             self.set_view(self.args.view)
         if self.args.Re:
             self.set_Re(self.args.Re)
+        if self.args.t is not None:
+            self.scrub(self.args.t)
         if self.args.play:
             self.set_playing(True)
         if self.args.shot:
@@ -381,6 +383,8 @@ class MainWindow(QMainWindow):
             self.aux.want_centreline(sid, self.Re)
         elif spec.chart != "none":
             self.aux.want_curve(sid)
+            if self.partner is not None:  # its pressure over the beat and its size, for the chart and the colour scale
+                self.aux.want_curve(self.partner.sid)
         if sid == "inverse" and sid not in self.points:
             self.aux.want_points(sid)
         self.update_mode_line()
@@ -702,14 +706,18 @@ class MainWindow(QMainWindow):
             tank.update_cloud(None)
             return ""
         sid = self.spec.sid
-        if (sid, view) not in self.scales:
-            if view == "pressure":
-                m = float(np.nanpercentile(np.abs(vals), 99.5)) * 1.5 or 1.0
-                self.scales[(sid, view)] = (-m, m)
-            else:
+        if view == "pressure":
+            # one symmetric scale over the whole beat, the larger of the two networks' (the server measures it with the
+            # curves); until both have arrived, this frame's own size, not kept
+            beat = [(self.curves.get(s) or {}).get("p_abs_p99_mmHg") for s in (sid, self.partner.sid if self.partner else None) if s]
+            beat = [b for b in beat if b]
+            m = max(beat) if beat else (float(np.nanpercentile(np.abs(vals), 99.5)) * 1.5 or 1.0)
+            lo, hi = -m, m
+        else:
+            if (sid, view) not in self.scales:
                 ref = f.get("speed_mri", vals)
                 self.scales[(sid, view)] = (0.0, float(np.nanpercentile(ref, 99.5)) * 1.2 or 1.0)
-        lo, hi = self.scales[(sid, view)]
+            lo, hi = self.scales[(sid, view)]
         lut = theme.MAPS["diverging" if view == "pressure" else "sequential"]
         tank.update_cloud(vals, lut, lo, hi, alpha=0.55 if view != "mri" else 0.8)
         label = {"mri": "scan speed", "speed": "network speed", "pressure": "network pressure"}[view]
@@ -726,8 +734,10 @@ class MainWindow(QMainWindow):
 
     def on_curve(self, sid: str, data: Dict):
         self.curves[sid] = data
-        if self.spec and sid == self.spec.sid:
+        if self.spec and sid in (self.spec.sid, self.partner.sid if self.partner else None):
             self.draw_chart()
+            if S.is_vessel(self.spec.sid):
+                self.render_field()  # the pressure colour scale comes with the curves
 
     def on_points(self, sid: str, data: Dict):
         if data and S.is_vessel(sid):
@@ -757,7 +767,7 @@ class MainWindow(QMainWindow):
                 return
             self.rack.chart.draw("centreline", data, s.pigment, Re=line[0], line=line[1])
         elif data is not None and s.chart == "coa_compare":
-            self.rack.chart.draw("coa_compare", data, s.pigment, t=self.t)
+            self.rack.chart.draw("coa_compare", data, s.pigment, t=self.t, partner=self.curves.get(self.partner.sid) if self.partner else None)
         elif data is not None and s.chart == "pressure_drop":
             self.rack.chart.draw("pressure_drop", data, s.pigment, t=self.t)
         elif data is not None and s.chart == "lambdas":
@@ -887,6 +897,7 @@ def main(argv=None):
     ap.add_argument("--scene", default=None, help="scene to open: " + ", ".join(s.sid for s in S.SCENES))
     ap.add_argument("--view", default=None)
     ap.add_argument("--Re", type=float, default=None)
+    ap.add_argument("--t", type=float, default=None, help="open at this time, in the scene's own units (the phantom: 10 ms)")
     ap.add_argument("--play", action="store_true")
     ap.add_argument("--size", type=lambda s: tuple(int(v) for v in s.lower().split("x")), default=(1600, 960))
     ap.add_argument("--shot", default=None, help="save a screenshot of the window to this PNG")

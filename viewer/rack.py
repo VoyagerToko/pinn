@@ -182,10 +182,12 @@ class EvidenceChart(QWidget):
         # the scene's time, dashed and kept off the spine by the axis margin, so it never reads as a second axis
         return ax.axvline(t or 0.0, color=theme.INK, lw=1.0, ls=(0, (2, 2)), alpha=0.8, zorder=1)
 
-    def draw(self, kind: str, data: Dict, pigment: str, t: Optional[float] = None, Re: Optional[float] = None, line: Optional[Dict] = None):
+    def draw(self, kind: str, data: Dict, pigment: str, t: Optional[float] = None, Re: Optional[float] = None, line: Optional[Dict] = None,
+             partner: Optional[Dict] = None):
         import matplotlib
 
         self.kind = kind
+        manual_layout = None  # (left, right, top, bottom, hspace) when tight_layout cannot place a grid of panels
         with matplotlib.rc_context(theme.mpl_style()):
             self.fig.clf()
             ink, soft = theme.INK, theme.INK_SOFT
@@ -241,7 +243,43 @@ class EvidenceChart(QWidget):
                           handlelength=1.8, columnspacing=1.4, borderaxespad=0.2)
                 self.cursor = self._cursor(ax, (t or 0.0) * ks)
             elif kind == "coa_compare":
-                ax = self._ax("Peak pressure drop across the coarctation, every phantom case", pad=50)
+                # top: this case over one heartbeat, the catheter against both networks on the scan's clock (the scene's
+                # time is in 10 ms units); below: the peak drop of every case and method
+                self._time_scale = 0.01
+                nets = [(c, label, alpha) for c, label, alpha in ((data, "laminar", 0.5), (partner, "eddy viscosity", 1.0))
+                        if c and c.get("dp_pinn_mmHg")]
+                if data.get("cath_t_s") or nets:
+                    gs = self.fig.add_gridspec(2, 1, height_ratios=[1.0, 1.25], hspace=0.62)
+                    axw = self.fig.add_subplot(gs[0])
+                    axw.set_title("Pressure drop over one heartbeat, this case", loc="left", color=ink, fontsize=10.5, fontweight="semibold", pad=5)
+                    if data.get("cath_t_s"):
+                        axw.plot(data["cath_t_s"], data["cath_dp_scan_mmHg"], color=ink, lw=1.7, zorder=3,
+                                 label=f"catheter, peak {max(data['cath_dp_scan_mmHg']):.1f}")
+                    for c, label, alpha in nets:
+                        axw.plot(c["t_s"], c["dp_pinn_mmHg"], color=pigment, alpha=alpha, lw=1.9, zorder=4,
+                                 label=f"network, {label}, peak {max(c['dp_pinn_mmHg']):.1f}")
+                    axw.axhline(0.0, color=soft, lw=0.6, alpha=0.5)
+                    tops = [max(data["cath_dp_scan_mmHg"])] if data.get("cath_t_s") else []
+                    tops += [max(c["dp_pinn_mmHg"]) for c, *_ in nets]
+                    lo_w = axw.get_ylim()[0]
+                    axw.set_ylim(lo_w, 1.6 * max(tops + [1.0]))  # headroom: the key sits above the curves
+                    axw.set_ylabel("mmHg", fontsize=9)
+                    axw.set_xlabel("time in the heartbeat [s]", fontsize=9)
+                    axw.tick_params(length=3, width=0.6, labelsize=8.5)
+                    axw.margins(x=0.01)
+                    axw.legend(loc="upper right", fontsize=8.0, labelcolor=soft, handlelength=1.4, borderaxespad=0.3, frameon=False)
+                    self.cursor = self._cursor(axw, (t or 0.0) * 0.01)
+                    ax = self.fig.add_subplot(gs[1])
+                    ax.set_title("Peak pressure drop, every phantom case", loc="left", color=ink, fontsize=10.5, fontweight="semibold", pad=5)
+                    ax.tick_params(length=3, width=0.6, labelsize=8.5)
+                    # the key sits in the empty right part of the panel (the axis runs to 1.75x the longest bar)
+                    legend_kw = dict(loc="center right", fontsize=7.5, labelcolor=soft, handlelength=1.0, frameon=False)
+                    manual_layout = (0.25, 0.98, 0.94, 0.12, 0.78)
+                else:
+                    ax = self._ax("Peak pressure drop across the coarctation, every phantom case", pad=50)
+                    legend_kw = dict(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=3, fontsize=9.0, labelcolor=soft, handlelength=1.2,
+                                     columnspacing=1.0, borderaxespad=0.2)
+                    self.cursor = None
                 rows = sorted(data.get("rows", []), key=lambda r: r["case"])
                 methods = [("catheter_peak_mmHg", "catheter", ink, 1.0), ("ppe_peak_mmHg", "conventional 4D flow", theme.STONE, 1.0),
                            ("bernoulli_peak_mmHg", "Bernoulli 4 v^2", theme.HAIR, 0.55), ("pinn_laminar_peak_mmHg", "network, laminar", pigment, 0.45),
@@ -260,9 +298,11 @@ class EvidenceChart(QWidget):
                         lab.set_fontweight("semibold")
                         lab.set_color(ink)
                 ax.invert_yaxis()
-                ax.set_xlabel("mmHg")
-                ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=3, fontsize=9.0, labelcolor=soft, handlelength=1.2, columnspacing=1.0, borderaxespad=0.2)
-                self.cursor = None
+                ax.set_xlabel("mmHg", fontsize=9)
+                if manual_layout:
+                    longest = max([v for r in rows for k, *_ in methods for v in [r.get(k)] if v is not None] or [1.0])
+                    ax.set_xlim(0, 1.75 * longest)
+                ax.legend(**legend_kw)
             elif kind == "dissipation":
                 ax = self._ax("Kinetic-energy dissipation", pad=30)
                 ax.plot(data["ref"]["t"], data["ref"]["dissipation_dns"], color=ink, lw=1.6, label="DNS reference", zorder=3)
@@ -277,12 +317,16 @@ class EvidenceChart(QWidget):
                 ax.legend(loc="lower left", bbox_to_anchor=(0.0, 1.0), ncol=3, fontsize=9.5, labelcolor=soft,
                           handlelength=1.8, columnspacing=1.4, borderaxespad=0.2)
                 self.cursor = self._cursor(ax, t)
-            self.fig.tight_layout(pad=0.6)
+            if manual_layout:
+                left, right, top, bottom, hspace = manual_layout
+                self.fig.subplots_adjust(left=left, right=right, top=top, bottom=bottom, hspace=hspace)
+            else:
+                self.fig.tight_layout(pad=0.6)
         self.canvas.draw_idle()
 
     def move_cursor(self, t: float):
         if self.cursor is not None:
-            ts = t * self._time_scale if self.kind == "pressure_drop" else t
+            ts = t * self._time_scale if self.kind in ("pressure_drop", "coa_compare") else t
             self.cursor.set_xdata([ts, ts])
             self.canvas.draw_idle()
 
